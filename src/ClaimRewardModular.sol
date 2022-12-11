@@ -116,9 +116,9 @@ contract ClaimRewardModular {
     // user need to approve this contract for the following token :
     // SDT, SD_FRAX_3CRV
     function claimAndExtraActions(
-        bool[] memory actions,
-        address[] memory _gauges,
-        LockStatus memory _lockStatus,
+        bool[] calldata actions,
+        address[] calldata _gauges,
+        LockStatus calldata _lockStatus,
         IMultiMerkleStash.claimParam[] calldata claims,
         bool swap,
         uint256 choice
@@ -189,7 +189,6 @@ contract ClaimRewardModular {
                 }
                 address depositor = depositors[token];
                 address pool = pools[token];
-                console.log(token);
                 uint256 balance = IERC20(token).balanceOf(address(this));
                 if (balance != 0) {
                     // Buy sdTKN from liquidity pool and stake sdTKN on gauge
