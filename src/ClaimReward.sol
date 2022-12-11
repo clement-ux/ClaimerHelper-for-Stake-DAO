@@ -7,7 +7,7 @@ import {IVeSDT} from "src/interfaces/IVeSDT.sol";
 import {IERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 
-contract ClaimRewardModular {
+contract ClaimReward {
     // using SafeERC20 for IERC20;
     address public constant SDT = 0x73968b9a57c6E53d41345FD57a6E6ae27d6CDB2F;
     address public constant veSDT = 0x0C30476f66034E11782938DF8e4384970B6c9e8a;
