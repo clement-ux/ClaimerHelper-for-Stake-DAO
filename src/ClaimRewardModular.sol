@@ -260,7 +260,7 @@ contract ClaimRewardModular {
         // swap ETH for STETH
         output = IPoolSDTFXPB(SDT_FXBP).exchange(1, 0, balance, minAmount, false, _receiver);
     }
-
+ 
     function _swapTKNForSdTKN(address _pool, uint256 _amount, address _receiver) private returns (uint256 output) {
         // calculate amount received
         uint256 amount = IMetapool(_pool).get_dy(0, 1, _amount);
