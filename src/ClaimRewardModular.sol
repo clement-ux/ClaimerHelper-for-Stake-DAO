@@ -50,10 +50,17 @@ contract ClaimRewardModular {
     mapping(address => uint256) public poolsIndex;
     mapping(address => bool) public blacklisted;
 
-    struct LockStatus {
+    struct Actions {
+        // For Bribes
+        IMultiMerkleStash.claimParam[] claims;
+        // For veSDT rewards
+        bool swapVeSDTRewards;
+        uint256 choice;
+        // For lockers and strategies rewards
         bool[] locked;
         bool[] staked;
         bool[] buy;
+        // For relocking SDT into veSDT
         bool lockSDT;
     }
 
@@ -115,21 +122,16 @@ contract ClaimRewardModular {
 
     // user need to approve this contract for the following token :
     // SDT, SD_FRAX_3CRV
-    function claimAndExtraActions(
-        bool[] calldata actions,
-        address[] calldata _gauges,
-        LockStatus calldata _lockStatus,
-        IMultiMerkleStash.claimParam[] calldata claims,
-        bool swap,
-        uint256 choice
-    ) external {
-        if (actions[0]) _processBribes(claims, msg.sender);
+    function claimAndExtraActions(bool[] calldata executeActions, address[] calldata gauges, Actions calldata actions)
+        external
+    {
+        if (executeActions[0]) _processBribes(actions.claims, msg.sender);
 
-        if (actions[1]) _processSdFrax3CRV(swap, choice);
+        if (executeActions[1]) _processSdFrax3CRV(actions.swapVeSDTRewards, actions.choice);
 
-        if (actions[2]) _processGaugesClaim(_gauges, _lockStatus);
+        if (executeActions[2]) _processGaugesClaim(gauges, actions);
 
-        _processSDT(_lockStatus.lockSDT);
+        _processSDT(actions.lockSDT);
     }
 
     ////////////////////////////////////////////////////////////////
@@ -164,8 +166,8 @@ contract ClaimRewardModular {
         }
     }
 
-    function _processGaugesClaim(address[] memory _gauges, LockStatus memory _lockStatus) internal {
-        LockStatus memory lockStatus = _lockStatus;
+    function _processGaugesClaim(address[] memory _gauges, Actions memory _actions) internal {
+        Actions memory lockStatus = _actions;
         require(lockStatus.locked.length == lockStatus.staked.length, "different length");
         require(lockStatus.locked.length == depositorsCount, "different depositors length");
         uint256 length = _gauges.length;

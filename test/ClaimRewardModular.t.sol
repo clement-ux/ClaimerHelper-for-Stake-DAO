@@ -60,10 +60,10 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
     }
 
     function testInit() public {
-        bool[] memory actions = new bool[](3);
-        actions[0] = true;
-        actions[1] = true;
-        actions[2] = true;
+        bool[] memory executeActions = new bool[](3);
+        executeActions[0] = true;
+        executeActions[1] = true;
+        executeActions[2] = true;
 
         bool[] memory lockeds = new bool[](3);
         bool[] memory stakeds = new bool[](3);
@@ -77,15 +77,17 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
         buys[0] = false; // fxs
         buys[1] = false; // angle
         buys[2] = true; // crv
-        ClaimRewardModular.LockStatus memory lockStatus = ClaimRewardModular.LockStatus(lockeds, stakeds, buys, true);
 
         IMultiMerkleStash.claimParam[] memory claimParams = new IMultiMerkleStash.claimParam[](1);
         IMultiMerkleStash.claimParam memory claimParam3CRV =
             IMultiMerkleStash.claimParam(CRV3, claimer3CRV1Index, amountToClaim3CRV1, merkleProof3CRV1);
         claimParams[0] = claimParam3CRV;
 
+        ClaimRewardModular.Actions memory actions =
+            ClaimRewardModular.Actions(claimParams, true, 2, lockeds, stakeds, buys, true);
+
         vm.startPrank(ALICE);
         sdfrax3crv.approve(address(claimer), type(uint256).max);
-        claimer.claimAndExtraActions(actions, gauges, lockStatus, claimParams, true, 0);
+        claimer.claimAndExtraActions(executeActions, gauges, actions);
     }
 }
