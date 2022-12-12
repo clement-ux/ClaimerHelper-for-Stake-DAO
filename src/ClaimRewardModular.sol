@@ -30,6 +30,7 @@ contract ClaimRewardModular {
     address public constant SDT_FXBP = 0x3e3C6c7db23cdDEF80B694679aaF1bCd9517D0Ae;
     address public constant GC_LOCKERS = 0x75f8f7fa4b6DA6De9F4fE972c811b778cefce882;
     address public constant GC_STRATEGIES = 0x3F3F0776D411eb97Cfa4E3eb25F33c01ca4e7Ca8;
+    address public constant FRAX_SDT_ZAPPER = 0x5De4EF4879F4fe3bBADF2227D2aC5d0E2D76C895;
 
     address public multiMerkleStash;
     address public governance;
@@ -247,18 +248,15 @@ contract ClaimRewardModular {
     /// --- HELPERS
     ///////////////////////////////////////////////////////////////
     function _swapFRAXForSDT(uint256 _amount, address _receiver) private returns (uint256 output) {
-        // Get crvFRAX LP
-        IFraxUsdc(FRAX_USDC_POOL).add_liquidity([_amount, 0], 0);
-
-        uint256 balance = IERC20(CRV_FRAX).balanceOf(address(this));
-        // calculate amount received
-        uint256 amount = IPoolSDTFXPB(SDT_FXBP).get_dy(1, 0, balance);
+        
+        // get_dy on the zapper for this _amount
+        uint256 amount = IZap(FRAX_SDT_ZAPPER).get_dy(SDT_FXBP, 1, 0, _amount);
 
         // calculate minimum amount received
         uint256 minAmount = amount * (BASE_UNIT - slippage) / BASE_UNIT;
 
-        // swap ETH for STETH
-        output = IPoolSDTFXPB(SDT_FXBP).exchange(1, 0, balance, minAmount, false, _receiver);
+        // swap FRAX for SDT
+        output = IZap(FRAX_SDT_ZAPPER).exchange(SDT_FXBP, 1, 0, _amount, minAmount, false, _receiver);
     }
 
     function _swapTKNForSdTKN(address _pool, uint256 _amount, address _receiver) private returns (uint256 output) {
