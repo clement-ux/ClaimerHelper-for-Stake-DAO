@@ -8,7 +8,7 @@ User will be able to do in a single transactions the following actions :
     - swap sdFrax3CRV into FRAX 
     - swap sdFrax3CRV into SDT (can be locked into veSDT after)
 - claim rewards obtained from lockers and strategies choose between following actions for TKN (CRV, FXS, ANGLE)
-    - swap for sdTKN (help to have a better peg) and deposit into gauge
+    - swap for sdTKN (help to have a better peg) and deposit into gauge (Lucas idea 🙏)
     - mint sdTKN using depositor and stake sdTKN or not
     - obtain TKN 
 - relock all SDT obtained from bribes, veSDT, lockers and strategies rewards.  
