@@ -8,9 +8,7 @@ import {IDepositor} from "src/interfaces/IDepositor.sol";
 import {IVeSDT} from "src/interfaces/IVeSDT.sol";
 import {IFeeDistributor} from "src/interfaces/IFeeDistributor.sol";
 import {IVault} from "src/interfaces/IVault.sol";
-import {IMetapool} from "src/interfaces/IMetapool.sol";
-import {IPoolSDTFXPB} from "src/interfaces/IPoolSDTFXPB.sol";
-import {IFraxUsdc} from "src/interfaces/IFraxUsdc.sol";
+import {IStableSwap} from "src/interfaces/IStableSwap.sol";
 import {IZap} from "src/interfaces/IZap.sol";
 import {IMultiMerkleStash} from "src/interfaces/IMultiMerkleStash.sol";
 import {IGaugeController} from "src/interfaces/IGaugeController.sol";
@@ -20,36 +18,9 @@ import {SafeERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/utils/
 contract ClaimRewardModular {
     using SafeERC20 for IERC20;
 
-    address public constant SDT = 0x73968b9a57c6E53d41345FD57a6E6ae27d6CDB2F;
-    address public constant VE_SDT = 0x0C30476f66034E11782938DF8e4384970B6c9e8a;
-    address public constant FRAX = 0x853d955aCEf822Db058eb8505911ED77F175b99e;
-    address public constant SD_FRAX_3CRV = 0x5af15DA84A4a6EDf2d9FA6720De921E1026E37b7;
-    address public constant FRAX_3CRV = 0xd632f22692FaC7611d2AA1C0D552930D43CAEd3B;
-    address public constant CRV_FRAX = 0x3175Df0976dFA876431C2E9eE6Bc45b65d3473CC;
-    address public constant FRAX_USDC_POOL = 0xDcEF968d416a41Cdac0ED8702fAC8128A64241A2;
-    address public constant SDT_FXBP = 0x3e3C6c7db23cdDEF80B694679aaF1bCd9517D0Ae;
-    address public constant GC_LOCKERS = 0x75f8f7fa4b6DA6De9F4fE972c811b778cefce882;
-    address public constant GC_STRATEGIES = 0x3F3F0776D411eb97Cfa4E3eb25F33c01ca4e7Ca8;
-    address public constant FRAX_SDT_ZAPPER = 0x5De4EF4879F4fe3bBADF2227D2aC5d0E2D76C895;
-
-    address public multiMerkleStash;
-    address public governance;
-    address public veSDTFeeDistributor;
-
-    uint256 private constant MAX_REWARDS = 8;
-    uint256 private constant BASE_UNIT = 1e18;
-    uint256 public depositorsCount;
-    uint256 public poolsCount;
-
-    uint256 public slippage;
-
-    bool public initialization;
-
-    mapping(address => address) public depositors;
-    mapping(address => uint256) public depositorsIndex;
-    mapping(address => address) public pools;
-    mapping(address => uint256) public poolsIndex;
-    mapping(address => bool) public blacklisted;
+    ////////////////////////////////////////////////////////////////
+    /// --- STRUCTS
+    ///////////////////////////////////////////////////////////////
 
     struct Actions {
         // For Bribes
@@ -65,9 +36,56 @@ contract ClaimRewardModular {
         bool lockSDT;
     }
 
-    error GAUGE_NOT_ENABLE();
-    error BLACKLISTED_GAUGE();
-    error ALREADY_INITIALIZED();
+    ////////////////////////////////////////////////////////////////
+    /// --- CONSTANTS & IMMUTABLES
+    ///////////////////////////////////////////////////////////////
+
+    address public constant VE_SDT = 0x0C30476f66034E11782938DF8e4384970B6c9e8a;
+    address public constant SDT = 0x73968b9a57c6E53d41345FD57a6E6ae27d6CDB2F;
+    address public constant SDT_FXBP = 0x3e3C6c7db23cdDEF80B694679aaF1bCd9517D0Ae;
+    address public constant FRAX = 0x853d955aCEf822Db058eb8505911ED77F175b99e;
+    address public constant FRAX_3CRV = 0xd632f22692FaC7611d2AA1C0D552930D43CAEd3B;
+    address public constant SD_FRAX_3CRV = 0x5af15DA84A4a6EDf2d9FA6720De921E1026E37b7;
+
+    address public constant GC_LOCKERS = 0x75f8f7fa4b6DA6De9F4fE972c811b778cefce882;
+    address public constant GC_STRATEGIES = 0x3F3F0776D411eb97Cfa4E3eb25F33c01ca4e7Ca8;
+    address public constant CURVE_ZAPPER = 0x5De4EF4879F4fe3bBADF2227D2aC5d0E2D76C895;
+
+    uint256 private constant MAX_REWARDS = 8;
+    uint256 private constant BASE_UNIT = 1e18;
+
+    ////////////////////////////////////////////////////////////////
+    /// --- STORAGE VARS
+    ///////////////////////////////////////////////////////////////
+
+    address public governance;
+    address public multiMerkleStash = 0x03E34b085C52985F6a5D27243F20C84bDdc01Db4;
+    address public veSDTFeeDistributor = 0x29f3dd38dB24d3935CF1bf841e6b2B461A3E5D92;
+
+    uint256 public depositorsCount;
+    uint256 public poolsCount;
+    uint256 public slippage = 1e16;
+
+    bool public initialization;
+
+    mapping(address => address) public depositors;
+    mapping(address => uint256) public depositorsIndex;
+    mapping(address => address) public pools;
+    mapping(address => uint256) public poolsIndex;
+    mapping(address => bool) public blacklisted;
+
+    ////////////////////////////////////////////////////////////////
+    /// --- MODIFIERS
+    ///////////////////////////////////////////////////////////////
+
+    modifier onlyGovernance() {
+        require(msg.sender == governance, "!gov");
+        _;
+    }
+
+    ////////////////////////////////////////////////////////////////
+    /// --- EVENTS
+    ///////////////////////////////////////////////////////////////
 
     event GaugeEnabled(address gauge);
     event GaugeDisabled(address gauge);
@@ -77,16 +95,25 @@ contract ClaimRewardModular {
     event RewardsClaimed(address[] gauges);
     event GovernanceChanged(address oldG, address newG);
 
-    modifier onlyGovernance() {
-        require(msg.sender == governance, "!gov");
-        _;
-    }
+    ////////////////////////////////////////////////////////////////
+    /// --- ERRORS
+    ///////////////////////////////////////////////////////////////
+
+    error GAUGE_NOT_ENABLE();
+    error BLACKLISTED_GAUGE();
+    error ALREADY_INITIALIZED();
+    error ALREADY_ADDED();
+    error NOT_ADDED();
+    error DIFFERENT_LENGTH();
+    error BALANCE_NOT_NULL();
+    error ADDRESS_NULL();
+
+    ////////////////////////////////////////////////////////////////
+    /// --- CONSTRUCTOR
+    ///////////////////////////////////////////////////////////////
 
     constructor() {
         governance = msg.sender;
-        veSDTFeeDistributor = 0x29f3dd38dB24d3935CF1bf841e6b2B461A3E5D92;
-        multiMerkleStash = 0x03E34b085C52985F6a5D27243F20C84bDdc01Db4;
-        slippage = 1e16;
     }
 
     function init() external onlyGovernance {
@@ -94,10 +121,8 @@ contract ClaimRewardModular {
         initialization = true;
         IERC20(SD_FRAX_3CRV).approve(SD_FRAX_3CRV, type(uint256).max);
         IERC20(FRAX_3CRV).approve(FRAX_3CRV, type(uint256).max);
-        IERC20(FRAX).approve(SDT_FXBP, type(uint256).max);
-        IERC20(CRV_FRAX).approve(SDT_FXBP, type(uint256).max);
+        IERC20(FRAX).approve(CURVE_ZAPPER, type(uint256).max);
         IERC20(SDT).approve(VE_SDT, type(uint256).max);
-        IERC20(FRAX).approve(FRAX_USDC_POOL, type(uint256).max);
     }
 
     ////////////////////////////////////////////////////////////////
@@ -126,9 +151,9 @@ contract ClaimRewardModular {
     function claimAndExtraActions(bool[] calldata executeActions, address[] calldata gauges, Actions calldata actions)
         external
     {
-        if (executeActions[0]) _processBribes(actions.claims, msg.sender);
+        if (executeActions[0]) _processBribes(actions.claims, msg.sender, actions.lockSDT);
 
-        if (executeActions[1]) _processSdFrax3CRV(actions.swapVeSDTRewards, actions.choice);
+        if (executeActions[1]) _processSdFrax3CRV(actions.swapVeSDTRewards, actions.choice, actions.lockSDT);
 
         if (executeActions[2]) _processGaugesClaim(gauges, actions);
 
@@ -138,39 +163,46 @@ contract ClaimRewardModular {
     ////////////////////////////////////////////////////////////////
     /// --- INTERNAL LOGIC
     ///////////////////////////////////////////////////////////////
-    function _processBribes(IMultiMerkleStash.claimParam[] calldata claims, address user) internal {
+    function _processBribes(IMultiMerkleStash.claimParam[] calldata claims, address user, bool lockSDT) internal {
         uint256 balanceBefore = IERC20(SDT).balanceOf(user);
         IMultiMerkleStash(multiMerkleStash).claimMulti(user, claims);
-        uint256 diff = IERC20(SDT).balanceOf(user) - balanceBefore;
-        if (diff > 0) IERC20(SDT).safeTransferFrom(user, address(this), diff);
+        if (lockSDT) {
+            uint256 diff = IERC20(SDT).balanceOf(user) - balanceBefore;
+            if (diff > 0) IERC20(SDT).safeTransferFrom(user, address(this), diff);
+        }
     }
 
-    function _processSdFrax3CRV(bool swap, uint256 choice) internal {
+    function _processSdFrax3CRV(bool swapVeSDTRewards, uint256 choice, bool lockSDT) internal {
         // Choice : 0 -> Obtain FRAX_3CRV
         // Choice : 1 -> Obtain FRAX
         // Choice : 2 -> Obtain SDT
         uint256 balance = IVault(SD_FRAX_3CRV).balanceOf(msg.sender);
         IFeeDistributor(veSDTFeeDistributor).claim(msg.sender);
-        if (swap) {
-            uint256 diff = IVault(SD_FRAX_3CRV).balanceOf(msg.sender) - balance;
+        if (swapVeSDTRewards) {
+            uint256 diff = IERC20(SD_FRAX_3CRV).balanceOf(msg.sender) - balance;
             IERC20(SD_FRAX_3CRV).safeTransferFrom(msg.sender, address(this), diff);
             balance = IERC20(SD_FRAX_3CRV).balanceOf(address(this));
             IERC20(SD_FRAX_3CRV).approve(SD_FRAX_3CRV, balance);
             IVault(SD_FRAX_3CRV).withdraw(balance);
             balance = IERC20(FRAX_3CRV).balanceOf(address(this));
-            if (choice == 0) IERC20(FRAX_3CRV).transfer(msg.sender, balance);
-            if (choice == 1) IMetapool(FRAX_3CRV).remove_liquidity_one_coin(balance, 0, 0, msg.sender);
-            if (choice > 1) {
-                uint256 received = IMetapool(FRAX_3CRV).remove_liquidity_one_coin(balance, 0, 0, address(this));
-                _swapFRAXForSDT(received, address(this));
+            if (choice < 1) {
+                IERC20(FRAX_3CRV).transfer(msg.sender, balance);
+            } else if (choice < 2) {
+                IStableSwap(FRAX_3CRV).remove_liquidity_one_coin(balance, 0, 0, msg.sender);
+            } else {
+                uint256 received = IStableSwap(FRAX_3CRV).remove_liquidity_one_coin(balance, 0, 0, address(this));
+                if (!lockSDT) _swapFRAXForSDT(received, msg.sender);
+                else _swapFRAXForSDT(received, address(this));
             }
         }
     }
 
     function _processGaugesClaim(address[] memory _gauges, Actions memory _actions) internal {
         Actions memory lockStatus = _actions;
-        require(lockStatus.locked.length == lockStatus.staked.length, "different length");
-        require(lockStatus.locked.length == depositorsCount, "different depositors length");
+        if (lockStatus.locked.length != lockStatus.staked.length) revert DIFFERENT_LENGTH();
+        if (lockStatus.locked.length != lockStatus.buy.length) revert DIFFERENT_LENGTH();
+        if (lockStatus.locked.length != depositorsCount) revert DIFFERENT_LENGTH();
+
         uint256 length = _gauges.length;
         // Claim rewards token from gauges
         for (uint8 index; index < length;) {
@@ -185,42 +217,41 @@ contract ClaimRewardModular {
 
             // skip the first reward token, it is SDT for any LGV4
             // it loops at most until max rewards, it is hardcoded on LGV4
-            for (uint8 j = 1; j < MAX_REWARDS;) {
+            uint256 rewardCount = ILiquidityGauge(gauge).reward_count();
+            for (uint8 j = 1; j < rewardCount;) {
                 address token = ILiquidityGauge(gauge).reward_tokens(j);
-                if (token == address(0)) {
-                    break;
-                }
                 address depositor = depositors[token];
                 address pool = pools[token];
                 uint256 balance = IERC20(token).balanceOf(address(this));
+
                 if (balance != 0) {
-                    // Buy sdTKN from liquidity pool and stake sdTKN on gauge
+                    // Buy sdTKN from liquidity pool
                     if (pool != address(0) && lockStatus.buy[poolsIndex[pool]]) {
-                        IERC20(token).approve(pool, balance);
-                        uint256 received = _swapTKNForSdTKN(pool, balance, address(this));
-                        // No sure if the gauge are the good one here
-                        address sdToken = IPoolSDTFXPB(pool).coins(1);
-                        IERC20(sdToken).approve(gauge, received);
-                        ILiquidityGauge(gauge).deposit(received, msg.sender);
+                        // Don't stake sdTKN on gauge
+                        if (!lockStatus.staked[poolsIndex[pool]]) {
+                            _swapTKNForSdTKN(pool, balance, msg.sender);
+                        }
+                        // Stake sdTKN on gauge
+                        else {
+                            uint256 received = _swapTKNForSdTKN(pool, balance, address(this));
+                            IERC20(IStableSwap(pool).coins(1)).approve(gauge, received);
+                            ILiquidityGauge(gauge).deposit(received, msg.sender);
+                        }
                         console.log("1");
                     }
-                    // Mint sdTKN using depositor
+                    // Mint sdTKN using depositor and stake it on gauge or not
                     else if (depositor != address(0) && lockStatus.locked[depositorsIndex[depositor]]) {
-                        IERC20(token).approve(depositor, balance);
-                        if (lockStatus.staked[depositorsIndex[depositor]]) {
-                            IDepositor(depositor).deposit(balance, false, true, msg.sender);
-                        } else {
-                            IDepositor(depositor).deposit(balance, false, false, msg.sender);
-                        }
+                        IDepositor(depositor).deposit(
+                            balance, false, lockStatus.staked[depositorsIndex[depositor]], msg.sender
+                        );
                         console.log("2");
                     }
                     // Transfer TKN to user
                     else {
-                        SafeERC20.safeTransfer(IERC20(token), msg.sender, balance);
+                        IERC20(token).safeTransfer(msg.sender, balance);
                         console.log("3");
                     }
-                    uint256 balanceLeft = IERC20(token).balanceOf(address(this));
-                    require(balanceLeft == 0, "wrong amount sent");
+                    if (IERC20(token).balanceOf(address(this)) != 0) revert BALANCE_NOT_NULL();
                 }
                 unchecked {
                     ++j;
@@ -240,7 +271,7 @@ contract ClaimRewardModular {
             } else {
                 SafeERC20.safeTransfer(IERC20(SDT), msg.sender, amount);
             }
-            require(IERC20(SDT).balanceOf(address(this)) == 0, "wrong amount sent");
+            if (IERC20(SDT).balanceOf(address(this)) != 0) revert BALANCE_NOT_NULL();
         }
     }
 
@@ -248,58 +279,79 @@ contract ClaimRewardModular {
     /// --- HELPERS
     ///////////////////////////////////////////////////////////////
     function _swapFRAXForSDT(uint256 _amount, address _receiver) private returns (uint256 output) {
-        
         // get_dy on the zapper for this _amount
-        uint256 amount = IZap(FRAX_SDT_ZAPPER).get_dy(SDT_FXBP, 1, 0, _amount);
+        uint256 amount = IZap(CURVE_ZAPPER).get_dy(SDT_FXBP, 1, 0, _amount);
 
         // calculate minimum amount received
         uint256 minAmount = amount * (BASE_UNIT - slippage) / BASE_UNIT;
 
         // swap FRAX for SDT
-        output = IZap(FRAX_SDT_ZAPPER).exchange(SDT_FXBP, 1, 0, _amount, minAmount, false, _receiver);
+        output = IZap(CURVE_ZAPPER).exchange(SDT_FXBP, 1, 0, _amount, minAmount, false, _receiver);
     }
 
     function _swapTKNForSdTKN(address _pool, uint256 _amount, address _receiver) private returns (uint256 output) {
         // calculate amount received
-        uint256 amount = IMetapool(_pool).get_dy(0, 1, _amount);
+        uint256 amount = IStableSwap(_pool).get_dy(0, 1, _amount);
 
         // calculate minimum amount received
         uint256 minAmount = amount * (BASE_UNIT - slippage) / BASE_UNIT;
 
         // swap ETH for STETH
-        output = IMetapool(_pool).exchange(0, 1, _amount, minAmount, _receiver);
+        output = IStableSwap(_pool).exchange(0, 1, _amount, minAmount, _receiver);
     }
 
     ////////////////////////////////////////////////////////////////
     /// --- GOVERNANCE
     ///////////////////////////////////////////////////////////////
-    function addDepositor(address _token, address _depositor) external onlyGovernance {
-        require(_token != address(0), "can't be zero address");
-        require(_depositor != address(0), "can't be zero address");
-        require(depositors[_token] == address(0), "already added");
-        depositors[_token] = _depositor;
-        depositorsIndex[_depositor] = depositorsCount;
+    function addDepositor(address token, address depositor) external onlyGovernance {
+        if (token == address(0)) revert ADDRESS_NULL();
+        if (depositor == address(0)) revert ADDRESS_NULL();
+        if (depositors[token] != address(0)) revert ALREADY_ADDED();
+        depositors[token] = depositor;
+        depositorsIndex[depositor] = depositorsCount;
         ++depositorsCount;
-        emit DepositorEnabled(_token, _depositor);
+        IERC20(token).approve(depositor, type(uint256).max);
+        emit DepositorEnabled(token, depositor);
     }
 
-    function toggleBlacklistOnPool(address pool) external onlyGovernance {
-        require(pool != address(0), "address null");
-        blacklisted[pool] = !blacklisted[pool];
+    function updateDepositor(address token, address newDepositor) external onlyGovernance {
+        if (token == address(0)) revert ADDRESS_NULL();
+        if (newDepositor == address(0)) revert ADDRESS_NULL();
+        if (depositors[token] == address(0)) revert NOT_ADDED();
+        IERC20(token).approve(depositors[token], 0);
+        depositors[token] = newDepositor;
+        IERC20(token).approve(newDepositor, type(uint256).max);
+        emit DepositorEnabled(token, newDepositor);
     }
 
     function addPool(address token, address pool) external onlyGovernance {
-        require(token != address(0), "can't be zero address");
-        require(pool != address(0), "can't be zero address");
-        require(pools[token] == address(0), "already added");
+        if (token == address(0)) revert ADDRESS_NULL();
+        if (pool == address(0)) revert ADDRESS_NULL();
+        if (pools[token] != address(0)) revert ALREADY_ADDED();
         pools[token] = pool;
         poolsIndex[pool] = poolsCount;
         ++poolsCount;
+        IERC20(token).approve(pool, type(uint256).max);
         emit PoolAdded(token, pool);
     }
 
+    function updatePool(address token, address newPool) external onlyGovernance {
+        if (token == address(0)) revert ADDRESS_NULL();
+        if (newPool == address(0)) revert ADDRESS_NULL();
+        if (pools[token] == address(0)) revert NOT_ADDED();
+        IERC20(token).approve(pools[token], type(uint256).max);
+        pools[token] = newPool;
+        IERC20(token).approve(newPool, type(uint256).max);
+        emit PoolAdded(token, newPool);
+    }
+
+    function toggleBlacklistOnPool(address pool) external onlyGovernance {
+        if (pool == address(0)) revert ADDRESS_NULL();
+        blacklisted[pool] = !blacklisted[pool];
+    }
+
     function setGovernance(address _governance) external onlyGovernance {
-        require(_governance != address(0), "can't be zero address");
+        if (_governance == address(0)) revert ADDRESS_NULL();
         emit GovernanceChanged(governance, _governance);
         governance = _governance;
     }

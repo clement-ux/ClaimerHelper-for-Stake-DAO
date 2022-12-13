@@ -8,7 +8,7 @@ import {IDepositor} from "src/interfaces/IDepositor.sol";
 import {IVeSDT} from "src/interfaces/IVeSDT.sol";
 import {IFeeDistributor} from "src/interfaces/IFeeDistributor.sol";
 import {IVault} from "src/interfaces/IVault.sol";
-import {IMetapool} from "src/interfaces/IMetapool.sol";
+import {IStableSwap} from "src/interfaces/IStableSwap.sol";
 import {IMultiMerkleStash} from "src/interfaces/IMultiMerkleStash.sol";
 import {IGaugeController} from "src/interfaces/IGaugeController.sol";
 import {IERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
