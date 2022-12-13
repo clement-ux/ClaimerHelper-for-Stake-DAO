@@ -7,4 +7,5 @@ broadcast/
 .github/
 node_modules
 lcov.info
+report.txt
 lib/openzeppelin-contracts/

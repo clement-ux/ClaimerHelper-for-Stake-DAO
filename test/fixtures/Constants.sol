@@ -45,6 +45,7 @@ abstract contract Constants {
     address public constant GAUGE_GUNI_AGEUR_ETH = 0x125FC0b592Db2a21fea8a5f6B2F86b1D6417Bf66;
     address public constant GAUGE_SDCRV = 0x7f50786A0b15723D741727882ee99a0BF34e3466;
     address public constant GAUGE_SDANGLE = 0xE55843a90672f7d8218285e51EE8fF8E233F35d5;
+    address public constant GAUGE_SDFXS = 0xF3C6e8fbB946260e8c2a55d48a5e01C82fD63106;
     address public constant CRV_DEPOSITOR = 0xc1e3Ca8A3921719bE0aE3690A0e036feB4f69191;
     address public constant ANGLE_DEPOSITOR = 0x8A97e8B3389D431182aC67c0DF7D46FF8DCE7121;
     address public constant FXS_DEPOSITOR = 0xFaF3740167B866b571465B063c6B3A71Ba9b6285;
@@ -111,6 +112,7 @@ abstract contract Constants {
     ///////////////////////////////////////////////////////////////
     address public constant CRV = 0xD533a949740bb3306d119CC777fa900bA034cd52;
     address public constant CRV3 = 0x6c3F90f043a72FA612cbac8115EE7e52BDe6E490;
+    address public constant SD_CRV = 0xD1b5651E55D4CeeD36251c61c50C889B36F6abB5;
 
     address public constant CURVE_FEE_DISTRIBUTOR = 0xA464e6DCda8AC41e03616F95f4BC98a13b8922Dc;
     ////////////////////////////////////////////////////////////////

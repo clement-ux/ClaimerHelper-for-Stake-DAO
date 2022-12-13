@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity 0.8.17;
 
-import "lib/forge-std/src/Test.sol";
-
 import {ILiquidityGauge} from "src/interfaces/ILiquidityGauge.sol";
 import {IDepositor} from "src/interfaces/IDepositor.sol";
 import {IVeSDT} from "src/interfaces/IVeSDT.sol";
@@ -28,10 +26,12 @@ contract ClaimRewardModular {
         // For veSDT rewards
         bool swapVeSDTRewards;
         uint256 choice;
+        uint256 minAmountSDT;
         // For lockers and strategies rewards
         bool[] locked;
         bool[] staked;
         bool[] buy;
+        uint256[] minAmount;
         // For relocking SDT into veSDT
         bool lockSDT;
     }
@@ -79,7 +79,7 @@ contract ClaimRewardModular {
     ///////////////////////////////////////////////////////////////
 
     modifier onlyGovernance() {
-        require(msg.sender == governance, "!gov");
+        if (msg.sender != governance) revert AUTH_ONLY_GOVERNANCE();
         _;
     }
 
@@ -101,12 +101,16 @@ contract ClaimRewardModular {
 
     error GAUGE_NOT_ENABLE();
     error BLACKLISTED_GAUGE();
-    error ALREADY_INITIALIZED();
-    error ALREADY_ADDED();
+
     error NOT_ADDED();
+    error ALREADY_ADDED();
+    error ALREADY_INITIALIZED();
     error DIFFERENT_LENGTH();
-    error BALANCE_NOT_NULL();
+
     error ADDRESS_NULL();
+    error BALANCE_NOT_NULL();
+
+    error AUTH_ONLY_GOVERNANCE();
 
     ////////////////////////////////////////////////////////////////
     /// --- CONSTRUCTOR
@@ -119,10 +123,10 @@ contract ClaimRewardModular {
     function init() external onlyGovernance {
         if (initialization) revert ALREADY_INITIALIZED();
         initialization = true;
-        IERC20(SD_FRAX_3CRV).approve(SD_FRAX_3CRV, type(uint256).max);
-        IERC20(FRAX_3CRV).approve(FRAX_3CRV, type(uint256).max);
-        IERC20(FRAX).approve(CURVE_ZAPPER, type(uint256).max);
         IERC20(SDT).approve(VE_SDT, type(uint256).max);
+        IERC20(FRAX).approve(CURVE_ZAPPER, type(uint256).max);
+        IERC20(FRAX_3CRV).approve(FRAX_3CRV, type(uint256).max);
+        IERC20(SD_FRAX_3CRV).approve(SD_FRAX_3CRV, type(uint256).max);
     }
 
     ////////////////////////////////////////////////////////////////
@@ -134,11 +138,6 @@ contract ClaimRewardModular {
         for (uint8 i; i < length;) {
             address gauge = _gauges[i];
             if (blacklisted[gauge]) revert BLACKLISTED_GAUGE();
-
-            (bool success1,) = GC_LOCKERS.call(abi.encodeWithSignature("gauge_types(address)", gauge));
-            (bool success2,) = GC_STRATEGIES.call(abi.encodeWithSignature("gauge_types(address)", gauge));
-            if (!success1 && !success2) revert GAUGE_NOT_ENABLE(); // replace : require(gauges[gauge] > 0, "Gauge not enabled");
-
             ILiquidityGauge(_gauges[i]).claim_rewards_for(msg.sender, msg.sender);
             unchecked {
                 ++i;
@@ -153,7 +152,9 @@ contract ClaimRewardModular {
     {
         if (executeActions[0]) _processBribes(actions.claims, msg.sender, actions.lockSDT);
 
-        if (executeActions[1]) _processSdFrax3CRV(actions.swapVeSDTRewards, actions.choice, actions.lockSDT);
+        if (executeActions[1]) {
+            _processSdFrax3CRV(actions.swapVeSDTRewards, actions.choice, actions.minAmountSDT, actions.lockSDT);
+        }
 
         if (executeActions[2]) _processGaugesClaim(gauges, actions);
 
@@ -172,7 +173,7 @@ contract ClaimRewardModular {
         }
     }
 
-    function _processSdFrax3CRV(bool swapVeSDTRewards, uint256 choice, bool lockSDT) internal {
+    function _processSdFrax3CRV(bool swapVeSDTRewards, uint256 choice, uint256 minAmountSDT, bool lockSDT) internal {
         // Choice : 0 -> Obtain FRAX_3CRV
         // Choice : 1 -> Obtain FRAX
         // Choice : 2 -> Obtain SDT
@@ -191,8 +192,8 @@ contract ClaimRewardModular {
                 IStableSwap(FRAX_3CRV).remove_liquidity_one_coin(balance, 0, 0, msg.sender);
             } else {
                 uint256 received = IStableSwap(FRAX_3CRV).remove_liquidity_one_coin(balance, 0, 0, address(this));
-                if (!lockSDT) _swapFRAXForSDT(received, msg.sender);
-                else _swapFRAXForSDT(received, address(this));
+                if (!lockSDT) _swapFRAXForSDT(received, minAmountSDT, msg.sender);
+                else _swapFRAXForSDT(received, minAmountSDT, address(this));
             }
         }
     }
@@ -207,12 +208,7 @@ contract ClaimRewardModular {
         // Claim rewards token from gauges
         for (uint8 index; index < length;) {
             address gauge = _gauges[index];
-
             if (blacklisted[gauge]) revert BLACKLISTED_GAUGE();
-            (bool success1,) = GC_LOCKERS.call(abi.encodeWithSignature("gauge_types(address)", gauge));
-            (bool success2,) = GC_STRATEGIES.call(abi.encodeWithSignature("gauge_types(address)", gauge));
-            if (!success1 && !success2) revert GAUGE_NOT_ENABLE(); // remplace : require(gauges[gauge] > 0, "Gauge not enabled");
-
             ILiquidityGauge(gauge).claim_rewards_for(msg.sender, address(this));
 
             // skip the first reward token, it is SDT for any LGV4
@@ -223,35 +219,33 @@ contract ClaimRewardModular {
                 address depositor = depositors[token];
                 address pool = pools[token];
                 uint256 balance = IERC20(token).balanceOf(address(this));
-
                 if (balance != 0) {
                     // Buy sdTKN from liquidity pool
                     if (pool != address(0) && lockStatus.buy[poolsIndex[pool]]) {
                         // Don't stake sdTKN on gauge
                         if (!lockStatus.staked[poolsIndex[pool]]) {
-                            _swapTKNForSdTKN(pool, balance, msg.sender);
+                            _swapTKNForSdTKN(pool, balance, lockStatus.minAmount[poolsIndex[pool]], msg.sender);
                         }
                         // Stake sdTKN on gauge
                         else {
-                            uint256 received = _swapTKNForSdTKN(pool, balance, address(this));
+                            uint256 received =
+                                _swapTKNForSdTKN(pool, balance, lockStatus.minAmount[poolsIndex[pool]], address(this));
                             IERC20(IStableSwap(pool).coins(1)).approve(gauge, received);
                             ILiquidityGauge(gauge).deposit(received, msg.sender);
                         }
-                        console.log("1");
                     }
                     // Mint sdTKN using depositor and stake it on gauge or not
                     else if (depositor != address(0) && lockStatus.locked[depositorsIndex[depositor]]) {
                         IDepositor(depositor).deposit(
                             balance, false, lockStatus.staked[depositorsIndex[depositor]], msg.sender
                         );
-                        console.log("2");
                     }
                     // Transfer TKN to user
                     else {
                         IERC20(token).safeTransfer(msg.sender, balance);
-                        console.log("3");
                     }
-                    if (IERC20(token).balanceOf(address(this)) != 0) revert BALANCE_NOT_NULL();
+                    // Unreachable code
+                    //if (IERC20(token).balanceOf(address(this)) != 0) revert BALANCE_NOT_NULL();
                 }
                 unchecked {
                     ++j;
@@ -269,35 +263,27 @@ contract ClaimRewardModular {
             if (lockSDT) {
                 IVeSDT(VE_SDT).deposit_for(msg.sender, amount);
             } else {
-                SafeERC20.safeTransfer(IERC20(SDT), msg.sender, amount);
+                IERC20(SDT).safeTransfer(msg.sender, amount);
             }
-            if (IERC20(SDT).balanceOf(address(this)) != 0) revert BALANCE_NOT_NULL();
+            // Unreachable code
+            //if (IERC20(SDT).balanceOf(address(this)) != 0) revert BALANCE_NOT_NULL();
         }
     }
 
     ////////////////////////////////////////////////////////////////
     /// --- HELPERS
     ///////////////////////////////////////////////////////////////
-    function _swapFRAXForSDT(uint256 _amount, address _receiver) private returns (uint256 output) {
-        // get_dy on the zapper for this _amount
-        uint256 amount = IZap(CURVE_ZAPPER).get_dy(SDT_FXBP, 1, 0, _amount);
-
-        // calculate minimum amount received
-        uint256 minAmount = amount * (BASE_UNIT - slippage) / BASE_UNIT;
-
+    function _swapFRAXForSDT(uint256 _amount, uint256 _minAmount, address _receiver) private returns (uint256 output) {
         // swap FRAX for SDT
-        output = IZap(CURVE_ZAPPER).exchange(SDT_FXBP, 1, 0, _amount, minAmount, false, _receiver);
+        output = IZap(CURVE_ZAPPER).exchange(SDT_FXBP, 1, 0, _amount, _minAmount, false, _receiver);
     }
 
-    function _swapTKNForSdTKN(address _pool, uint256 _amount, address _receiver) private returns (uint256 output) {
-        // calculate amount received
-        uint256 amount = IStableSwap(_pool).get_dy(0, 1, _amount);
-
-        // calculate minimum amount received
-        uint256 minAmount = amount * (BASE_UNIT - slippage) / BASE_UNIT;
-
-        // swap ETH for STETH
-        output = IStableSwap(_pool).exchange(0, 1, _amount, minAmount, _receiver);
+    function _swapTKNForSdTKN(address _pool, uint256 _amount, uint256 _minAmount, address _receiver)
+        private
+        returns (uint256 output)
+    {
+        // swap TKN for sdTKN
+        output = IStableSwap(_pool).exchange(0, 1, _amount, _minAmount, _receiver);
     }
 
     ////////////////////////////////////////////////////////////////
@@ -339,20 +325,34 @@ contract ClaimRewardModular {
         if (token == address(0)) revert ADDRESS_NULL();
         if (newPool == address(0)) revert ADDRESS_NULL();
         if (pools[token] == address(0)) revert NOT_ADDED();
-        IERC20(token).approve(pools[token], type(uint256).max);
+        IERC20(token).approve(pools[token], 0);
         pools[token] = newPool;
         IERC20(token).approve(newPool, type(uint256).max);
         emit PoolAdded(token, newPool);
     }
 
-    function toggleBlacklistOnPool(address pool) external onlyGovernance {
-        if (pool == address(0)) revert ADDRESS_NULL();
-        blacklisted[pool] = !blacklisted[pool];
+    function toggleBlacklistOnGauge(address gauge) external onlyGovernance {
+        if (gauge == address(0)) revert ADDRESS_NULL();
+        blacklisted[gauge] = !blacklisted[gauge];
     }
 
     function setGovernance(address _governance) external onlyGovernance {
         if (_governance == address(0)) revert ADDRESS_NULL();
         emit GovernanceChanged(governance, _governance);
         governance = _governance;
+    }
+
+    function setSlippage(uint256 _slippage) external onlyGovernance {
+        slippage = _slippage;
+    }
+
+    function setMultiMerkleStash(address _multiMerkleStash) external onlyGovernance {
+        if (_multiMerkleStash == address(0)) revert ADDRESS_NULL();
+        multiMerkleStash = _multiMerkleStash;
+    }
+
+    function setVeSDTFeeDistributor(address _veSDTFeeDistributor) external onlyGovernance {
+        if (_veSDTFeeDistributor == address(0)) revert ADDRESS_NULL();
+        veSDTFeeDistributor = _veSDTFeeDistributor;
     }
 }

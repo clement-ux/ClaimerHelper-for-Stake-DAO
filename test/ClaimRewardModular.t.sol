@@ -16,13 +16,18 @@ import {SafeERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/utils/
 
 import {ClaimRewardModular} from "src/ClaimRewardModular.sol";
 import {Constants} from "test/fixtures/Constants.sol";
-import {MerkleProofFile} from "test/fixtures/MerkleProofFile.sol";
+import {MerkleProofFile} from "test/fixtures/MerkleProofFile.t.sol";
 
 contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
     address public constant ALICE = 0x1A162A5FdaEbb0113f7B83Ed87A43BCF0B6a4D1E;
     address public constant LOCAL_DEPLOYER = address(0xDE);
+    address public constant FAKE = address(0xFA4E);
 
     address[] public gauges;
+
+    uint256 public constant BASE_UNIT = 1e18;
+    uint256 public constant SLIPPAGE = 1e16;
+    uint256[] public claimable;
 
     ClaimRewardModular public claimer;
     IERC20 public sdfrax3crv = IERC20(SD_FRAX_3CRV);
@@ -30,16 +35,23 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
     IERC20 public frax = IERC20(FRAX);
     IERC20 public gno = IERC20(GNO);
     IERC20 public crv3 = IERC20(CRV3);
+    IERC20 public crv = IERC20(CRV);
+    IERC20 public angle = IERC20(ANGLE);
     IERC20 public sdt = IERC20(SDT);
+    IERC20 public ageur = IERC20(AG_EUR);
+    IERC20 public sdcrv = IERC20(SD_CRV);
     IVeSDT public vesdt = IVeSDT(VE_SDT);
 
+    // Parameters for claimAndExtraActions functions
     bool[] executeActions;
     IMultiMerkleStash.claimParam[] claimParams;
     bool swapVeSDTRewards;
     uint256 choice;
+    uint256 minAmountSDT;
     bool[] lockeds;
     bool[] stakeds;
     bool[] buys;
+    uint256[] minAmounts;
     bool lockSDT;
 
     function setUp() public {
@@ -49,13 +61,6 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
 
         vm.startPrank(LOCAL_DEPLOYER);
         claimer = new ClaimRewardModular();
-        claimer.addDepositor(FXS, FXS_DEPOSITOR);
-        claimer.addDepositor(ANGLE, ANGLE_DEPOSITOR);
-        claimer.addDepositor(CRV, CRV_DEPOSITOR);
-        claimer.addPool(FXS, POOL_FXS_SDFXS);
-        claimer.addPool(ANGLE, POOL_ANGLE_SDANGLE);
-        claimer.addPool(CRV, POOL_CRV_SDCRV);
-        claimer.init();
         vm.stopPrank();
 
         vm.startPrank(STAKE_DAO_MULTISIG);
@@ -65,6 +70,8 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
         vm.startPrank(STDDEPLOYER);
         ILiquidityGauge(GAUGE_SDCRV).set_claimer(address(claimer));
         ILiquidityGauge(GAUGE_SDANGLE).set_claimer(address(claimer));
+        // Add fake reward into gauge sdCRV
+        ILiquidityGauge(GAUGE_SDCRV).add_reward(FXS, FAKE);
         vm.stopPrank();
 
         vm.startPrank(ALICE);
@@ -79,40 +86,138 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
         baseClaim();
     }
 
-    function baseClaim() public {
-        // List of actions to execute
-        //bool[] memory executeActions = new bool[](3);
-        executeActions.push(false); // Claim rewards from bribes
-        executeActions.push(false); // Claim rewards from veSDT
-        executeActions.push(false); // Claim rewards from lockers/strategies
+    ////////////////////////////////////////////////////////////////
+    /// --- GOVERNANCE
+    ///////////////////////////////////////////////////////////////
+    function testAddDepositor() public {
+        vm.startPrank(LOCAL_DEPLOYER);
+        vm.expectRevert(ClaimRewardModular.ADDRESS_NULL.selector);
+        claimer.addDepositor(address(0), CRV_DEPOSITOR);
+        vm.expectRevert(ClaimRewardModular.ADDRESS_NULL.selector);
+        claimer.addDepositor(CRV, address(0));
 
-        // Params for claiming bribes
-        // Bribes in 3CRV
-        claimParams.push(IMultiMerkleStash.claimParam(CRV3, claimer3CRV1Index, amountToClaim3CRV1, merkleProof3CRV1));
-        // Bribes in GNO
-        claimParams.push(IMultiMerkleStash.claimParam(GNO, claimerGNOIndex, amountToClaimGNO, merkleProofGNO));
-        // Bribes in SDT
-        claimParams.push(IMultiMerkleStash.claimParam(SDT, claimerSDTIndex, amountToClaimSDT, merkleProofSDT));
+        claimer.addDepositor(CRV, CRV_DEPOSITOR);
 
-        // Params for rewards from veSDT
-        swapVeSDTRewards = false;
-        choice = 0;
+        assertEq(claimer.depositors(CRV), CRV_DEPOSITOR);
+        assertEq(claimer.depositorsIndex(CRV_DEPOSITOR), 0);
+        assertEq(claimer.depositorsCount(), 1);
+        assertEq(crv.allowance(address(claimer), CRV_DEPOSITOR), type(uint256).max);
 
-        // List of actions to do
-        lockeds.push(false); // fxs
-        lockeds.push(false); // angle
-        lockeds.push(false); // crv
-        stakeds.push(false); // fxs
-        stakeds.push(false); // angle
-        stakeds.push(false); // crv
-        buys.push(false); // fxs
-        buys.push(false); // angle
-        buys.push(false); // crv
-
-        // Lock SDT
-        lockSDT = false;
+        vm.expectRevert(ClaimRewardModular.ALREADY_ADDED.selector);
+        claimer.addDepositor(CRV, CRV_DEPOSITOR);
     }
 
+    function testUpdateDepositor() public {
+        vm.startPrank(LOCAL_DEPLOYER);
+        vm.expectRevert(ClaimRewardModular.ADDRESS_NULL.selector);
+        claimer.updateDepositor(address(0), CRV_DEPOSITOR);
+        vm.expectRevert(ClaimRewardModular.ADDRESS_NULL.selector);
+        claimer.updateDepositor(CRV, address(0));
+        vm.expectRevert(ClaimRewardModular.NOT_ADDED.selector);
+        claimer.updateDepositor(CRV, CRV_DEPOSITOR);
+
+        claimer.addDepositor(CRV, CRV_DEPOSITOR);
+        claimer.updateDepositor(CRV, FAKE);
+
+        assertEq(claimer.depositors(CRV), FAKE);
+        assertEq(claimer.depositorsIndex(FAKE), 0);
+        assertEq(claimer.depositorsCount(), 1);
+        assertEq(crv.allowance(address(claimer), CRV_DEPOSITOR), 0);
+        assertEq(crv.allowance(address(claimer), FAKE), type(uint256).max);
+    }
+
+    function testAddPool() public {
+        vm.startPrank(LOCAL_DEPLOYER);
+        vm.expectRevert(ClaimRewardModular.ADDRESS_NULL.selector);
+        claimer.addPool(address(0), POOL_CRV_SDCRV);
+        vm.expectRevert(ClaimRewardModular.ADDRESS_NULL.selector);
+        claimer.addPool(CRV, address(0));
+
+        claimer.addPool(CRV, POOL_CRV_SDCRV);
+
+        assertEq(claimer.pools(CRV), POOL_CRV_SDCRV);
+        assertEq(claimer.poolsIndex(POOL_CRV_SDCRV), 0);
+        assertEq(claimer.poolsCount(), 1);
+        assertEq(crv.allowance(address(claimer), POOL_CRV_SDCRV), type(uint256).max);
+
+        vm.expectRevert(ClaimRewardModular.ALREADY_ADDED.selector);
+        claimer.addPool(CRV, POOL_CRV_SDCRV);
+    }
+
+    function testUpdatePool() public {
+        vm.startPrank(LOCAL_DEPLOYER);
+        vm.expectRevert(ClaimRewardModular.ADDRESS_NULL.selector);
+        claimer.updatePool(address(0), POOL_CRV_SDCRV);
+        vm.expectRevert(ClaimRewardModular.ADDRESS_NULL.selector);
+        claimer.updatePool(CRV, address(0));
+        vm.expectRevert(ClaimRewardModular.NOT_ADDED.selector);
+        claimer.updatePool(CRV, POOL_CRV_SDCRV);
+
+        claimer.addPool(CRV, POOL_CRV_SDCRV);
+        claimer.updatePool(CRV, FAKE);
+
+        assertEq(claimer.pools(CRV), FAKE);
+        assertEq(claimer.poolsIndex(FAKE), 0);
+        assertEq(claimer.poolsCount(), 1);
+        assertEq(crv.allowance(address(claimer), POOL_CRV_SDCRV), 0);
+        assertEq(crv.allowance(address(claimer), FAKE), type(uint256).max);
+    }
+
+    function testToggleBlacklistOnPool() public {
+        assertEq(claimer.blacklisted(FAKE), false);
+
+        vm.startPrank(LOCAL_DEPLOYER);
+        vm.expectRevert(ClaimRewardModular.ADDRESS_NULL.selector);
+        claimer.toggleBlacklistOnGauge(address(0));
+        claimer.toggleBlacklistOnGauge(FAKE);
+        assertEq(claimer.blacklisted(FAKE), true);
+        claimer.toggleBlacklistOnGauge(FAKE);
+        assertEq(claimer.blacklisted(FAKE), false);
+    }
+
+    function testSetGov() public {
+        vm.startPrank(LOCAL_DEPLOYER);
+        vm.expectRevert(ClaimRewardModular.ADDRESS_NULL.selector);
+        claimer.setGovernance(address(0));
+        claimer.setGovernance(ALICE);
+        assertEq(claimer.governance(), ALICE);
+    }
+
+    function testInit() public {
+        assertEq(claimer.initialization(), false);
+        vm.expectRevert(ClaimRewardModular.AUTH_ONLY_GOVERNANCE.selector);
+        claimer.init();
+        vm.startPrank(LOCAL_DEPLOYER);
+        claimer.init();
+        vm.expectRevert(ClaimRewardModular.ALREADY_INITIALIZED.selector);
+        claimer.init();
+    }
+
+    function testSetSlippage() public {
+        vm.prank(LOCAL_DEPLOYER);
+        claimer.setSlippage(1e17);
+        assertEq(claimer.slippage(), 1e17);
+    }
+
+    function testSetMulti() public {
+        vm.startPrank(LOCAL_DEPLOYER);
+        vm.expectRevert(ClaimRewardModular.ADDRESS_NULL.selector);
+        claimer.setMultiMerkleStash(address(0));
+        claimer.setMultiMerkleStash(FAKE);
+        assertEq(claimer.multiMerkleStash(), FAKE);
+    }
+
+    function testSetDistrib() public {
+        vm.startPrank(LOCAL_DEPLOYER);
+        vm.expectRevert(ClaimRewardModular.ADDRESS_NULL.selector);
+        claimer.setVeSDTFeeDistributor(address(0));
+        claimer.setVeSDTFeeDistributor(FAKE);
+        assertEq(claimer.veSDTFeeDistributor(), FAKE);
+    }
+
+    ////////////////////////////////////////////////////////////////
+    /// --- BRIBES
+    ///////////////////////////////////////////////////////////////
     function testClaimBribesOnlyNotLockSDT() public {
         executeActions[0] = true;
 
@@ -155,6 +260,9 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
         assertEq(lockedAfter.amount, lockedBefore.amount + int256(amountToClaimSDT), "5");
     }
 
+    ////////////////////////////////////////////////////////////////
+    /// --- SDFRAX3CRV
+    ///////////////////////////////////////////////////////////////
     function testClaimVeSDTRewardNoSwap() public {
         executeActions[1] = true;
 
@@ -214,13 +322,333 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
     }
 
     ////////////////////////////////////////////////////////////////
+    /// --- GAUGES
+    ///////////////////////////////////////////////////////////////
+    function testClaimGaugesSimple() public {
+        executeActions[2] = true;
+
+        (
+            uint256 claimableSDT,
+            uint256 claimableCRV,
+            uint256 claimableCRV3,
+            uint256 claimableANGLE,
+            uint256 claimableAGEUR
+        ) = claimableAmount(ALICE);
+
+        uint256 balanceBeforeCRV3 = crv3.balanceOf(ALICE);
+        uint256 balanceBeforeCRV = crv.balanceOf(ALICE);
+        uint256 balanceBeforeANGLE = angle.balanceOf(ALICE);
+        uint256 balanceBeforeAGEUR = ageur.balanceOf(ALICE);
+        uint256 balanceBeforeSDT = sdt.balanceOf(ALICE);
+        claim();
+
+        assertEq(ageur.balanceOf(ALICE), balanceBeforeAGEUR + claimableAGEUR);
+        assertEq(angle.balanceOf(ALICE), balanceBeforeANGLE + claimableANGLE);
+        assertEq(crv3.balanceOf(ALICE), balanceBeforeCRV3 + claimableCRV3);
+        assertEq(crv.balanceOf(ALICE), balanceBeforeCRV + claimableCRV);
+        assertEq(sdt.balanceOf(ALICE), balanceBeforeSDT + claimableSDT);
+    }
+
+    function testClaimGaugesBuyWithoutStaking() public {
+        executeActions[2] = true;
+        buys[2] = true; // crv
+        (
+            uint256 claimableSDT,
+            uint256 claimableCRV,
+            uint256 claimableCRV3,
+            uint256 claimableANGLE,
+            uint256 claimableAGEUR
+        ) = claimableAmount(ALICE);
+
+        uint256 dy = IStableSwap(POOL_CRV_SDCRV).get_dy(0, 1, claimableCRV);
+        minAmounts[2] = dy * (BASE_UNIT - SLIPPAGE) / BASE_UNIT;
+
+        uint256 balanceBeforeCRV3 = crv3.balanceOf(ALICE);
+        uint256 balanceBeforeCRV = crv.balanceOf(ALICE);
+        uint256 balanceBeforeANGLE = angle.balanceOf(ALICE);
+        uint256 balanceBeforeAGEUR = ageur.balanceOf(ALICE);
+        uint256 balanceBeforeSDT = sdt.balanceOf(ALICE);
+        uint256 balanceBeforeSDCRV = sdcrv.balanceOf(ALICE);
+        claim();
+        assertEq(ageur.balanceOf(ALICE), balanceBeforeAGEUR + claimableAGEUR);
+        assertEq(angle.balanceOf(ALICE), balanceBeforeANGLE + claimableANGLE);
+        assertEq(crv3.balanceOf(ALICE), balanceBeforeCRV3 + claimableCRV3);
+        assertEq(crv.balanceOf(ALICE), balanceBeforeCRV);
+        assertEq(sdt.balanceOf(ALICE), balanceBeforeSDT + claimableSDT);
+        assertEq(sdcrv.balanceOf(ALICE), balanceBeforeSDCRV + dy);
+    }
+
+    function testClaimGaugesBuyStaking() public {
+        executeActions[2] = true;
+        stakeds[2] = true; // crv
+        buys[2] = true; // crv
+        (
+            uint256 claimableSDT,
+            uint256 claimableCRV,
+            uint256 claimableCRV3,
+            uint256 claimableANGLE,
+            uint256 claimableAGEUR
+        ) = claimableAmount(ALICE);
+
+        uint256 dy = IStableSwap(POOL_CRV_SDCRV).get_dy(0, 1, claimableCRV);
+        minAmounts[2] = dy * (BASE_UNIT - SLIPPAGE) / BASE_UNIT;
+
+        uint256 balanceBeforeCRV3 = crv3.balanceOf(ALICE);
+        uint256 balanceBeforeCRV = crv.balanceOf(ALICE);
+        uint256 balanceBeforeANGLE = angle.balanceOf(ALICE);
+        uint256 balanceBeforeAGEUR = ageur.balanceOf(ALICE);
+        uint256 balanceBeforeSDT = sdt.balanceOf(ALICE);
+        uint256 balanceBeforeSDCRVGauge = IERC20(GAUGE_SDCRV).balanceOf(ALICE);
+        claim();
+        assertEq(ageur.balanceOf(ALICE), balanceBeforeAGEUR + claimableAGEUR);
+        assertEq(angle.balanceOf(ALICE), balanceBeforeANGLE + claimableANGLE);
+        assertEq(crv3.balanceOf(ALICE), balanceBeforeCRV3 + claimableCRV3);
+        assertEq(crv.balanceOf(ALICE), balanceBeforeCRV);
+        assertEq(sdt.balanceOf(ALICE), balanceBeforeSDT + claimableSDT);
+        assertEq(IERC20(GAUGE_SDCRV).balanceOf(ALICE), balanceBeforeSDCRVGauge + dy);
+    }
+
+    function testClaimGaugesMintWithoutStaking() public {
+        executeActions[2] = true;
+        lockeds[2] = true; // crv
+        (
+            uint256 claimableSDT,
+            uint256 claimableCRV,
+            uint256 claimableCRV3,
+            uint256 claimableANGLE,
+            uint256 claimableAGEUR
+        ) = claimableAmount(ALICE);
+
+        uint256 balanceBeforeCRV3 = crv3.balanceOf(ALICE);
+        uint256 balanceBeforeCRV = crv.balanceOf(ALICE);
+        uint256 balanceBeforeANGLE = angle.balanceOf(ALICE);
+        uint256 balanceBeforeAGEUR = ageur.balanceOf(ALICE);
+        uint256 balanceBeforeSDT = sdt.balanceOf(ALICE);
+        uint256 balanceBeforeSDCRV = sdcrv.balanceOf(ALICE);
+        claim();
+        assertEq(ageur.balanceOf(ALICE), balanceBeforeAGEUR + claimableAGEUR);
+        assertEq(angle.balanceOf(ALICE), balanceBeforeANGLE + claimableANGLE);
+        assertEq(crv3.balanceOf(ALICE), balanceBeforeCRV3 + claimableCRV3);
+        assertEq(crv.balanceOf(ALICE), balanceBeforeCRV);
+        assertEq(sdt.balanceOf(ALICE), balanceBeforeSDT + claimableSDT);
+        assertApproxEqRel(sdcrv.balanceOf(ALICE), balanceBeforeSDCRV + claimableCRV, 1e15); // due to incentives fee to lock on depositor
+    }
+
+    function testClaimGaugesMintStaking() public {
+        executeActions[2] = true;
+        stakeds[2] = true; // crv
+        lockeds[2] = true; // crv
+        (
+            uint256 claimableSDT,
+            uint256 claimableCRV,
+            uint256 claimableCRV3,
+            uint256 claimableANGLE,
+            uint256 claimableAGEUR
+        ) = claimableAmount(ALICE);
+
+        uint256 balanceBeforeCRV3 = crv3.balanceOf(ALICE);
+        uint256 balanceBeforeCRV = crv.balanceOf(ALICE);
+        uint256 balanceBeforeANGLE = angle.balanceOf(ALICE);
+        uint256 balanceBeforeAGEUR = ageur.balanceOf(ALICE);
+        uint256 balanceBeforeSDT = sdt.balanceOf(ALICE);
+        uint256 balanceBeforeSDCRVGauge = IERC20(GAUGE_SDCRV).balanceOf(ALICE);
+        claim();
+        assertEq(ageur.balanceOf(ALICE), balanceBeforeAGEUR + claimableAGEUR);
+        assertEq(angle.balanceOf(ALICE), balanceBeforeANGLE + claimableANGLE);
+        assertEq(crv3.balanceOf(ALICE), balanceBeforeCRV3 + claimableCRV3);
+        assertEq(crv.balanceOf(ALICE), balanceBeforeCRV);
+        assertEq(sdt.balanceOf(ALICE), balanceBeforeSDT + claimableSDT);
+        assertApproxEqRel(IERC20(GAUGE_SDCRV).balanceOf(ALICE), balanceBeforeSDCRVGauge + claimableCRV, 1e15);
+    }
+
+    ////////////////////////////////////////////////////////////////
+    /// --- CLAIM REWARDS
+    ///////////////////////////////////////////////////////////////
+
+    function testClaimReward() public {
+        vm.prank(LOCAL_DEPLOYER);
+        claimer.init();
+        (
+            uint256 claimableSDT,
+            uint256 claimableCRV,
+            uint256 claimableCRV3,
+            uint256 claimableANGLE,
+            uint256 claimableAGEUR
+        ) = claimableAmount(ALICE);
+
+        uint256 balanceBeforeCRV3 = crv3.balanceOf(ALICE);
+        uint256 balanceBeforeCRV = crv.balanceOf(ALICE);
+        uint256 balanceBeforeANGLE = angle.balanceOf(ALICE);
+        uint256 balanceBeforeAGEUR = ageur.balanceOf(ALICE);
+        uint256 balanceBeforeSDT = sdt.balanceOf(ALICE);
+        vm.prank(ALICE);
+        claimer.claimRewards(gauges);
+
+        assertEq(ageur.balanceOf(ALICE), balanceBeforeAGEUR + claimableAGEUR);
+        assertEq(angle.balanceOf(ALICE), balanceBeforeANGLE + claimableANGLE);
+        assertEq(crv3.balanceOf(ALICE), balanceBeforeCRV3 + claimableCRV3);
+        assertEq(crv.balanceOf(ALICE), balanceBeforeCRV + claimableCRV);
+        assertEq(sdt.balanceOf(ALICE), balanceBeforeSDT + claimableSDT);
+    }
+
+    function testClaimRewardRevert() public {
+        vm.startPrank(LOCAL_DEPLOYER);
+        claimer.init();
+        claimer.toggleBlacklistOnGauge(gauges[0]);
+        vm.stopPrank();
+        vm.prank(ALICE);
+        vm.expectRevert(ClaimRewardModular.BLACKLISTED_GAUGE.selector);
+        claimer.claimRewards(gauges);
+    }
+
+    function testClaimExtraRevert0() public {
+        executeActions[2] = true;
+
+        vm.startPrank(LOCAL_DEPLOYER);
+        claimer.addDepositor(FXS, FXS_DEPOSITOR);
+        claimer.addDepositor(ANGLE, ANGLE_DEPOSITOR);
+        claimer.addDepositor(CRV, CRV_DEPOSITOR);
+        claimer.addPool(FXS, POOL_FXS_SDFXS);
+        claimer.addPool(ANGLE, POOL_ANGLE_SDANGLE);
+        claimer.addPool(CRV, POOL_CRV_SDCRV);
+        claimer.init();
+        vm.stopPrank();
+
+        lockeds.push(false);
+
+        ClaimRewardModular.Actions memory actions = ClaimRewardModular.Actions(
+            claimParams, swapVeSDTRewards, choice, minAmountSDT, lockeds, stakeds, buys, minAmounts, lockSDT
+        );
+        vm.prank(ALICE);
+        vm.expectRevert(ClaimRewardModular.DIFFERENT_LENGTH.selector);
+        claimer.claimAndExtraActions(executeActions, gauges, actions);
+
+        stakeds.push(true);
+        actions = ClaimRewardModular.Actions(
+            claimParams, swapVeSDTRewards, choice, minAmountSDT, lockeds, stakeds, buys, minAmounts, lockSDT
+        );
+        vm.prank(ALICE);
+        vm.expectRevert(ClaimRewardModular.DIFFERENT_LENGTH.selector);
+        claimer.claimAndExtraActions(executeActions, gauges, actions);
+
+        buys.push(true);
+        actions = ClaimRewardModular.Actions(
+            claimParams, swapVeSDTRewards, choice, minAmountSDT, lockeds, stakeds, buys, minAmounts, lockSDT
+        );
+        vm.prank(ALICE);
+        vm.expectRevert(ClaimRewardModular.DIFFERENT_LENGTH.selector);
+        claimer.claimAndExtraActions(executeActions, gauges, actions);
+    }
+
+    function testClaimExtraRevert1() public {
+        executeActions[2] = true;
+
+        vm.startPrank(LOCAL_DEPLOYER);
+        claimer.addDepositor(FXS, FXS_DEPOSITOR);
+        claimer.addDepositor(ANGLE, ANGLE_DEPOSITOR);
+        claimer.addDepositor(CRV, CRV_DEPOSITOR);
+        claimer.addPool(FXS, POOL_FXS_SDFXS);
+        claimer.addPool(ANGLE, POOL_ANGLE_SDANGLE);
+        claimer.addPool(CRV, POOL_CRV_SDCRV);
+        claimer.init();
+        vm.stopPrank();
+
+        vm.prank(LOCAL_DEPLOYER);
+        claimer.toggleBlacklistOnGauge(GAUGE_SDCRV);
+
+        ClaimRewardModular.Actions memory actions = ClaimRewardModular.Actions(
+            claimParams, swapVeSDTRewards, choice, minAmountSDT, lockeds, stakeds, buys, minAmounts, lockSDT
+        );
+        vm.prank(ALICE);
+        vm.expectRevert(ClaimRewardModular.BLACKLISTED_GAUGE.selector);
+        claimer.claimAndExtraActions(executeActions, gauges, actions);
+    }
+
+    // Todo : ClaimExtraAction with all flow
+    // Todo : _processGaugesClaim with depositor or pool not set
+    // Todo : _processSDT with 0 SDT
+    // Todo : Add events
+
+    ////////////////////////////////////////////////////////////////
     /// --- HELPERS
     ///////////////////////////////////////////////////////////////
     function claim() public {
         // Create the Actions structure
-        ClaimRewardModular.Actions memory actions =
-            ClaimRewardModular.Actions(claimParams, swapVeSDTRewards, choice, lockeds, stakeds, buys, lockSDT);
+        ClaimRewardModular.Actions memory actions = ClaimRewardModular.Actions(
+            claimParams, swapVeSDTRewards, choice, minAmountSDT, lockeds, stakeds, buys, minAmounts, lockSDT
+        );
+        vm.startPrank(LOCAL_DEPLOYER);
+        claimer.addDepositor(FXS, FXS_DEPOSITOR);
+        claimer.addDepositor(ANGLE, ANGLE_DEPOSITOR);
+        claimer.addDepositor(CRV, CRV_DEPOSITOR);
+        claimer.addPool(FXS, POOL_FXS_SDFXS);
+        claimer.addPool(ANGLE, POOL_ANGLE_SDANGLE);
+        claimer.addPool(CRV, POOL_CRV_SDCRV);
+        claimer.init();
+        vm.stopPrank();
+
         vm.prank(ALICE);
         claimer.claimAndExtraActions(executeActions, gauges, actions);
     }
+
+    function baseClaim() public {
+        // List of actions to execute
+        //bool[] memory executeActions = new bool[](3);
+        executeActions.push(false); // Claim rewards from bribes
+        executeActions.push(false); // Claim rewards from veSDT
+        executeActions.push(false); // Claim rewards from lockers/strategies
+
+        // Params for claiming bribes
+        // Bribes in 3CRV
+        claimParams.push(IMultiMerkleStash.claimParam(CRV3, claimer3CRV1Index, amountToClaim3CRV1, merkleProof3CRV1));
+        // Bribes in GNO
+        claimParams.push(IMultiMerkleStash.claimParam(GNO, claimerGNOIndex, amountToClaimGNO, merkleProofGNO));
+        // Bribes in SDT
+        claimParams.push(IMultiMerkleStash.claimParam(SDT, claimerSDTIndex, amountToClaimSDT, merkleProofSDT));
+
+        // Params for rewards from veSDT
+        swapVeSDTRewards = false;
+        choice = 0;
+        minAmountSDT = 0;
+
+        // List of actions to do
+        lockeds.push(false); // fxs
+        lockeds.push(false); // angle
+        lockeds.push(false); // crv
+        stakeds.push(false); // fxs
+        stakeds.push(false); // angle
+        stakeds.push(false); // crv
+        buys.push(false); // fxs
+        buys.push(false); // angle
+        buys.push(false); // crv
+        minAmounts.push(0); // fxs
+        minAmounts.push(0); // angle
+        minAmounts.push(0); // crv
+
+        // Lock SDT
+        lockSDT = false;
+    }
+
+    function claimableAmount(address user)
+        public
+        view
+        returns (
+            uint256 claimableSDT,
+            uint256 claimableCRV,
+            uint256 claimableCRV3,
+            uint256 claimableANGLE,
+            uint256 claimableAGEUR
+        )
+    {
+        claimableSDT = ILiquidityGauge(GAUGE_SDCRV).claimable_reward(user, SDT)
+            + ILiquidityGauge(GAUGE_SDANGLE).claimable_reward(user, SDT)
+            + ILiquidityGauge(GAUGE_GUNI_AGEUR_ETH).claimable_reward(user, SDT);
+        claimableCRV = ILiquidityGauge(GAUGE_SDCRV).claimable_reward(user, CRV);
+        claimableCRV3 = ILiquidityGauge(GAUGE_SDCRV).claimable_reward(user, CRV3);
+        claimableAGEUR = ILiquidityGauge(GAUGE_SDANGLE).claimable_reward(user, AG_EUR);
+        claimableANGLE = ILiquidityGauge(GAUGE_SDANGLE).claimable_reward(user, ANGLE)
+            + ILiquidityGauge(GAUGE_GUNI_AGEUR_ETH).claimable_reward(user, ANGLE);
+    }
+
+    function calculSDFRAX3CRVObtained() public view returns (uint256) {}
 }
