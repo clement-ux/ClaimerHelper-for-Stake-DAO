@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 pragma solidity 0.8.17;
 
-import {Test} from "lib/forge-std/src/Test.sol";
+import "lib/forge-std/src/Test.sol";
 
 import {ILiquidityGauge} from "src/interfaces/ILiquidityGauge.sol";
 import {IDepositor} from "src/interfaces/IDepositor.sol";
@@ -42,11 +42,14 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
     IERC20 public sdt = IERC20(SDT);
     IERC20 public ageur = IERC20(AG_EUR);
     IERC20 public sdcrv = IERC20(SD_CRV);
+    IERC20 public sdbal = IERC20(SD_BAL);
+    IERC20 public bal = IERC20(BAL);
     IVeSDT public vesdt = IVeSDT(VE_SDT);
 
     // Parameters for claimAndExtraActions functions
     bool[] executeActions;
     IMultiMerkleStash.claimParam[] claimParams;
+    bool stakeBribes;
     bool swapVeSDTRewards;
     uint256 choice;
     uint256 minAmountSDT;
@@ -256,6 +259,7 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
 
     function testClaimBribesOnlyAndLockSDT() public {
         executeActions[0] = true;
+        stakeBribes = true;
         lockSDT = true;
 
         uint256 balanceBeforeGNO = gno.balanceOf(ALICE);
@@ -478,10 +482,61 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
         assertApproxEqRel(IERC20(GAUGE_SDCRV).balanceOf(ALICE), balanceBeforeSDCRVGauge + claimableCRV, 1e15);
     }
 
+    function testClaimGaugesSimpleBalancer() public {
+        executeActions[2] = true;
+
+        (,,,,, uint256 claimableBAL) = claimableAmount(BOB);
+        uint256 balanceBeforeBal = bal.balanceOf(BOB);
+        claim(BOB);
+        assertEq(bal.balanceOf(BOB), balanceBeforeBal + claimableBAL, "2");
+    }
+
     function testClaimGaugesBuyWithoutStakingBalancer() public {
         executeActions[2] = true;
         buys[3] = true; // bal
+
+        (uint256 claimableSDT,,,,, uint256 claimableBAL) = claimableAmount(BOB);
+        uint256 balanceBeforeSDT = sdt.balanceOf(BOB);
+        uint256 balanceBeforeSDBAL = sdbal.balanceOf(BOB);
         claim(BOB);
+        assertEq(sdt.balanceOf(BOB), balanceBeforeSDT + claimableSDT, "1");
+        assertApproxEqRel(sdbal.balanceOf(BOB), balanceBeforeSDBAL + (claimableBAL * 622 / 1533), 4e16, "2"); // current price between
+    }
+
+    function testClaimGaugesBuyAndStakingBalancer() public {
+        executeActions[2] = true;
+        buys[3] = true; // bal
+        stakeds[3] = true; // bal
+
+        (,,,,, uint256 claimableBAL) = claimableAmount(BOB);
+        uint256 balanceBeforeSDBALGauge = IERC20(GAUGE_SDBAL).balanceOf(BOB);
+        claim(BOB);
+        assertApproxEqRel(
+            IERC20(GAUGE_SDBAL).balanceOf(BOB), balanceBeforeSDBALGauge + (claimableBAL * 622 / 1533), 5e16, "2"
+        );
+    }
+
+    function testClaimGaugesMintWithoutStakingBalancer() public {
+        executeActions[2] = true;
+        lockeds[3] = true; // bal
+
+        (,,,,, uint256 claimableBAL) = claimableAmount(BOB);
+        uint256 balanceBeforeSDBAL = sdbal.balanceOf(BOB);
+        claim(BOB);
+        assertApproxEqRel(sdbal.balanceOf(BOB), balanceBeforeSDBAL + (claimableBAL * 622 / 1533), 4e16, "2"); // current price between
+    }
+
+    function testClaimGaugesMintAndStakingBalancer() public {
+        executeActions[2] = true;
+        lockeds[3] = true; // bal
+        stakeds[3] = true; // bal
+
+        (,,,,, uint256 claimableBAL) = claimableAmount(BOB);
+        uint256 balanceBeforeSDBALGauge = IERC20(GAUGE_SDBAL).balanceOf(BOB);
+        claim(BOB);
+        assertApproxEqRel(
+            IERC20(GAUGE_SDBAL).balanceOf(BOB), balanceBeforeSDBALGauge + (claimableBAL * 622 / 1533), 5e16, "2"
+        );
     }
 
     ////////////////////////////////////////////////////////////////
@@ -535,7 +590,16 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
         lockeds.push(false);
 
         ClaimRewardModular.Actions memory actions = ClaimRewardModular.Actions(
-            claimParams, swapVeSDTRewards, choice, minAmountSDT, lockeds, stakeds, buys, minAmounts, lockSDT
+            claimParams,
+            stakeBribes,
+            swapVeSDTRewards,
+            choice,
+            minAmountSDT,
+            lockeds,
+            stakeds,
+            buys,
+            minAmounts,
+            lockSDT
         );
         vm.prank(ALICE);
         vm.expectRevert(ClaimRewardModular.DIFFERENT_LENGTH.selector);
@@ -543,7 +607,16 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
 
         stakeds.push(true);
         actions = ClaimRewardModular.Actions(
-            claimParams, swapVeSDTRewards, choice, minAmountSDT, lockeds, stakeds, buys, minAmounts, lockSDT
+            claimParams,
+            stakeBribes,
+            swapVeSDTRewards,
+            choice,
+            minAmountSDT,
+            lockeds,
+            stakeds,
+            buys,
+            minAmounts,
+            lockSDT
         );
         vm.prank(ALICE);
         vm.expectRevert(ClaimRewardModular.DIFFERENT_LENGTH.selector);
@@ -551,7 +624,16 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
 
         buys.push(true);
         actions = ClaimRewardModular.Actions(
-            claimParams, swapVeSDTRewards, choice, minAmountSDT, lockeds, stakeds, buys, minAmounts, lockSDT
+            claimParams,
+            stakeBribes,
+            swapVeSDTRewards,
+            choice,
+            minAmountSDT,
+            lockeds,
+            stakeds,
+            buys,
+            minAmounts,
+            lockSDT
         );
         vm.prank(ALICE);
         vm.expectRevert(ClaimRewardModular.DIFFERENT_LENGTH.selector);
@@ -570,7 +652,16 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
         claimer.toggleBlacklistOnGauge(GAUGE_SDCRV);
 
         ClaimRewardModular.Actions memory actions = ClaimRewardModular.Actions(
-            claimParams, swapVeSDTRewards, choice, minAmountSDT, lockeds, stakeds, buys, minAmounts, lockSDT
+            claimParams,
+            stakeBribes,
+            swapVeSDTRewards,
+            choice,
+            minAmountSDT,
+            lockeds,
+            stakeds,
+            buys,
+            minAmounts,
+            lockSDT
         );
         vm.prank(ALICE);
         vm.expectRevert(ClaimRewardModular.BLACKLISTED_GAUGE.selector);
@@ -588,7 +679,16 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
     function claim(address user) public {
         // Create the Actions structure
         ClaimRewardModular.Actions memory actions = ClaimRewardModular.Actions(
-            claimParams, swapVeSDTRewards, choice, minAmountSDT, lockeds, stakeds, buys, minAmounts, lockSDT
+            claimParams,
+            stakeBribes,
+            swapVeSDTRewards,
+            choice,
+            minAmountSDT,
+            lockeds,
+            stakeds,
+            buys,
+            minAmounts,
+            lockSDT
         );
         vm.startPrank(LOCAL_DEPLOYER);
         addDepositorsAndPools();
@@ -607,6 +707,7 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
         executeActions.push(false); // Claim rewards from bribes
         executeActions.push(false); // Claim rewards from veSDT
         executeActions.push(false); // Claim rewards from lockers/strategies
+        stakeBribes = false;
 
         // Params for claiming bribes
         // Bribes in 3CRV
@@ -656,6 +757,7 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
         claimer.addPool(FXS, POOL_FXS_SDFXS);
         claimer.addPool(ANGLE, POOL_ANGLE_SDANGLE);
         claimer.addPool(CRV, POOL_CRV_SDCRV);
+        claimer.addPool(BAL, POOL_BAL_SDBAL);
     }
 
     function claimableAmount(address user)

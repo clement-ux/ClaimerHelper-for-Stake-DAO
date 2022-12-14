@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity 0.8.17;
 
+import "lib/forge-std/src/Test.sol";
+
 import {ILiquidityGauge} from "src/interfaces/ILiquidityGauge.sol";
 import {IDepositor} from "src/interfaces/IDepositor.sol";
 import {IVeSDT} from "src/interfaces/IVeSDT.sol";
@@ -26,6 +28,7 @@ contract ClaimRewardModular {
     struct Actions {
         // For Bribes
         IMultiMerkleStash.claimParam[] claims;
+        bool stakeBribes;
         // For veSDT rewards
         bool swapVeSDTRewards;
         uint256 choice;
@@ -44,8 +47,13 @@ contract ClaimRewardModular {
     ///////////////////////////////////////////////////////////////
     address public constant BAL = 0xba100000625a3754423978a60c9317c58a424e3D;
     address public constant BPT = 0x5c6Ee304399DBdB9C8Ef030aB642B10820DB8F56;
+    address public constant FXS = 0x3432B6A60D23Ca0dFCa7761B7ab56459D9C964D0;
     address public constant SD_BAL = 0xF24d8651578a55b0C119B9910759a351A3458895;
+    address public constant SD_CRV = 0xD1b5651E55D4CeeD36251c61c50C889B36F6abB5;
+    address public constant SD_ANGLE = 0x752B4c6e92d96467fE9b9a2522EF07228E00F87c;
+    address public constant SD_FXS = 0x402F878BDd1f5C66FdAF0fabaBcF74741B68ac36;
     address public constant CRV = 0xD533a949740bb3306d119CC777fa900bA034cd52;
+    address public constant ANGLE = 0x31429d1856aD1377A8A0079410B297e1a9e214c2;
     address public constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
     address public constant VE_SDT = 0x0C30476f66034E11782938DF8e4384970B6c9e8a;
     address public constant SDT = 0x73968b9a57c6E53d41345FD57a6E6ae27d6CDB2F;
@@ -73,6 +81,7 @@ contract ClaimRewardModular {
 
     uint256 public depositorsCount;
     uint256 public poolsCount;
+    uint256 public gaugesCount;
     uint256 public slippage = 1e16;
 
     bool public initialization;
@@ -81,6 +90,8 @@ contract ClaimRewardModular {
     mapping(address => uint256) public depositorsIndex;
     mapping(address => address) public pools;
     mapping(address => uint256) public poolsIndex;
+    mapping(address => address) public gauges;
+    mapping(address => uint256) public gaugesIndex;
     mapping(address => bool) public blacklisted;
 
     ////////////////////////////////////////////////////////////////
@@ -133,6 +144,8 @@ contract ClaimRewardModular {
         if (initialization) revert ALREADY_INITIALIZED();
         initialization = true;
         IERC20(SDT).approve(VE_SDT, type(uint256).max);
+        IERC20(BAL).approve(BALANCER_VAULT, type(uint256).max);
+        IERC20(BPT).approve(BALANCER_VAULT, type(uint256).max);
         IERC20(FRAX).approve(CURVE_ZAPPER, type(uint256).max);
         IERC20(FRAX_3CRV).approve(FRAX_3CRV, type(uint256).max);
         IERC20(SD_FRAX_3CRV).approve(SD_FRAX_3CRV, type(uint256).max);
@@ -156,23 +169,24 @@ contract ClaimRewardModular {
 
     // user need to approve this contract for the following token :
     // SDT, SD_FRAX_3CRV
-    function claimAndExtraActions(bool[] calldata executeActions, address[] calldata gauges, Actions calldata actions)
+    function claimAndExtraActions(bool[] calldata executeActions, address[] calldata _gauges, Actions calldata actions)
         external
     {
         if (executeActions[0]) {
-            _processBribes(
-                actions.claims,
-                msg.sender,
-                actions.lockSDT,
-                (actions.staked[depositorsIndex[depositors[CRV]]] && executeActions[2])
-            );
+            //_processBribes(
+            //    actions.claims,
+            //    msg.sender,
+            //    actions.lockSDT,
+            //    (actions.staked[depositorsIndex[depositors[CRV]]] && executeActions[2])
+            //);
+            _processBribes(actions);
         }
 
         if (executeActions[1]) {
             _processSdFrax3CRV(actions.swapVeSDTRewards, actions.choice, actions.minAmountSDT, actions.lockSDT);
         }
 
-        if (executeActions[2]) _processGaugesClaim(gauges, actions);
+        if (executeActions[2]) _processGaugesClaim(_gauges, actions);
 
         _processSDT(actions.lockSDT);
     }
@@ -180,19 +194,46 @@ contract ClaimRewardModular {
     ////////////////////////////////////////////////////////////////
     /// --- INTERNAL LOGIC
     ///////////////////////////////////////////////////////////////
-    function _processBribes(IMultiMerkleStash.claimParam[] calldata claims, address user, bool lockSDT, bool stakeSdCRV)
-        internal
-    {
-        uint256 balanceBeforeSDT = IERC20(SDT).balanceOf(user);
-        uint256 balanceBeforeCRV = IERC20(CRV).balanceOf(user);
-        IMultiMerkleStash(multiMerkleStash).claimMulti(user, claims);
-        if (lockSDT) {
-            uint256 diff = IERC20(SDT).balanceOf(user) - balanceBeforeSDT;
-            if (diff > 0) IERC20(SDT).safeTransferFrom(user, address(this), diff);
-        }
-        if (stakeSdCRV) {
-            uint256 diff = IERC20(CRV).balanceOf(user) - balanceBeforeCRV;
-            if (diff > 0) IERC20(CRV).safeTransferFrom(user, address(this), diff);
+
+    function _processBribes(Actions calldata actions) internal {
+        IMultiMerkleStash(multiMerkleStash).claimMulti(msg.sender, actions.claims);
+        if (actions.stakeBribes) {
+            for (uint8 i; i < actions.claims.length; ++i) {
+                if (actions.claims[i].token == SDT) {
+                    if (actions.lockSDT) {
+                        IERC20(SDT).safeTransferFrom(msg.sender, address(this), actions.claims[i].amount);
+                    }
+                    continue;
+                }
+                if (actions.claims[i].token == SD_CRV) {
+                    if (gauges[CRV] != address(0) && actions.staked[gaugesIndex[gauges[CRV]]]) {
+                        IERC20(SD_CRV).safeTransferFrom(msg.sender, address(this), actions.claims[i].amount);
+                        ILiquidityGauge(gauges[CRV]).deposit(actions.claims[i].amount, msg.sender);
+                    }
+                    continue;
+                }
+                if (actions.claims[i].token == SD_BAL) {
+                    if (gauges[BAL] != address(0) && actions.staked[gaugesIndex[gauges[BAL]]]) {
+                        IERC20(SD_BAL).safeTransferFrom(msg.sender, address(this), actions.claims[i].amount);
+                        ILiquidityGauge(gauges[BAL]).deposit(actions.claims[i].amount, msg.sender);
+                    }
+                    continue;
+                }
+                if (actions.claims[i].token == SD_ANGLE) {
+                    if (gauges[ANGLE] != address(0) && actions.staked[gaugesIndex[gauges[ANGLE]]]) {
+                        IERC20(SD_ANGLE).safeTransferFrom(msg.sender, address(this), actions.claims[i].amount);
+                        ILiquidityGauge(gauges[ANGLE]).deposit(actions.claims[i].amount, msg.sender);
+                    }
+                    continue;
+                }
+                if (actions.claims[i].token == SD_FXS) {
+                    if (gauges[FXS] != address(0) && actions.staked[gaugesIndex[gauges[FXS]]]) {
+                        IERC20(SD_FXS).safeTransferFrom(msg.sender, address(this), actions.claims[i].amount);
+                        ILiquidityGauge(gauges[FXS]).deposit(actions.claims[i].amount, msg.sender);
+                    }
+                    continue;
+                }
+            }
         }
     }
 
@@ -288,7 +329,7 @@ contract ClaimRewardModular {
                         IERC20(token).safeTransfer(msg.sender, balance);
                     }
                     // Unreachable code
-                    //if (IERC20(token).balanceOf(address(this)) != 0) revert BALANCE_NOT_NULL();
+                    if (IERC20(token).balanceOf(address(this)) != 0) revert BALANCE_NOT_NULL();
                 }
                 unchecked {
                     ++j;
@@ -356,15 +397,14 @@ contract ClaimRewardModular {
         private
         returns (uint256 output)
     {
-        _swapBALForBPT(amount, minAmount, receiver);
+        _swapBALForBPT(amount, minAmount, address(this));
         amount = IERC20(BPT).balanceOf(address(this));
         minAmount = amount * (BASE_UNIT - 1e16) / BASE_UNIT;
 
         IBalancerVault.SingleSwap memory singleSwap = IBalancerVault.SingleSwap(
             IBalancerStablePool(pool).getPoolId(), IBalancerVault.SwapKind.GIVEN_IN, BPT, SD_BAL, amount, "0x"
         );
-        IBalancerVault.FundManagement memory funds =
-            IBalancerVault.FundManagement(address(this), false, receiver, false);
+        IBalancerVault.FundManagement memory funds = IBalancerVault.FundManagement(address(this), true, receiver, false);
         output = IBalancerVault(BALANCER_VAULT).swap(singleSwap, funds, minAmount, block.timestamp + 36_000);
     }
 
@@ -411,6 +451,27 @@ contract ClaimRewardModular {
         pools[token] = newPool;
         IERC20(token).approve(newPool, type(uint256).max);
         emit PoolAdded(token, newPool);
+    }
+
+    function addGauge(address token, address gauge) external onlyGovernance {
+        if (token == address(0)) revert ADDRESS_NULL();
+        if (gauge == address(0)) revert ADDRESS_NULL();
+        if (gauges[token] != address(0)) revert ALREADY_ADDED();
+        gauges[token] = gauge;
+        gaugesIndex[gauge] = gaugesCount;
+        ++gaugesCount;
+        IERC20(token).approve(gauge, type(uint256).max);
+        emit PoolAdded(token, gauge);
+    }
+
+    function updateGauge(address token, address newGauge) external onlyGovernance {
+        if (token == address(0)) revert ADDRESS_NULL();
+        if (newGauge == address(0)) revert ADDRESS_NULL();
+        if (gauges[token] == address(0)) revert NOT_ADDED();
+        IERC20(token).approve(gauges[token], 0);
+        gauges[token] = newGauge;
+        IERC20(token).approve(newGauge, type(uint256).max);
+        emit PoolAdded(token, newGauge);
     }
 
     function toggleBlacklistOnGauge(address gauge) external onlyGovernance {

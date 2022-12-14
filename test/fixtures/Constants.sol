@@ -65,6 +65,7 @@ abstract contract Constants {
     /// --- STAKE DAO TOKENS
     ///////////////////////////////////////////////////////////////
     address public constant SD3CRV = 0xB17640796e4c27a39AF51887aff3F8DC0daF9567;
+    address public constant SD_BAL = 0xF24d8651578a55b0C119B9910759a351A3458895;
 
     ////////////////////////////////////////////////////////////////
     /// --- VESDCRV
@@ -102,6 +103,8 @@ abstract contract Constants {
     address public constant BALANCER_GAUGE_CONTROLLER = 0xC128468b7Ce63eA702C1f104D55A2566b13D3ABD;
     address public constant BALANCER_SMART_WALLET_CHECKER = 0x7869296Efd0a76872fEE62A058C8fBca5c1c826C;
     address public constant BALANCER_MULTI_SIG = 0x10A19e7eE7d7F8a52822f6817de8ea18204F2e4f;
+
+    address public constant POOL_BAL_SDBAL = 0x2d011aDf89f0576C9B722c28269FcB5D50C2d179;
 
     ////////////////////////////////////////////////////////////////
     /// --- BLACKPOOL PROTOCOL
