@@ -8,6 +8,9 @@ import {IFeeDistributor} from "src/interfaces/IFeeDistributor.sol";
 import {IVault} from "src/interfaces/IVault.sol";
 import {IStableSwap} from "src/interfaces/IStableSwap.sol";
 import {IZap} from "src/interfaces/IZap.sol";
+import {IZapBalancer} from "src/interfaces/IZapBalancer.sol";
+import {IBalancerVault} from "src/interfaces/IBalancerVault.sol";
+import {IBalancerStablePool} from "src/interfaces/IBalancerStablePool.sol";
 import {IMultiMerkleStash} from "src/interfaces/IMultiMerkleStash.sol";
 import {IGaugeController} from "src/interfaces/IGaugeController.sol";
 import {IERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
@@ -39,7 +42,11 @@ contract ClaimRewardModular {
     ////////////////////////////////////////////////////////////////
     /// --- CONSTANTS & IMMUTABLES
     ///////////////////////////////////////////////////////////////
-
+    address public constant BAL = 0xba100000625a3754423978a60c9317c58a424e3D;
+    address public constant BPT = 0x5c6Ee304399DBdB9C8Ef030aB642B10820DB8F56;
+    address public constant SD_BAL = 0xF24d8651578a55b0C119B9910759a351A3458895;
+    address public constant CRV = 0xD533a949740bb3306d119CC777fa900bA034cd52;
+    address public constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
     address public constant VE_SDT = 0x0C30476f66034E11782938DF8e4384970B6c9e8a;
     address public constant SDT = 0x73968b9a57c6E53d41345FD57a6E6ae27d6CDB2F;
     address public constant SDT_FXBP = 0x3e3C6c7db23cdDEF80B694679aaF1bCd9517D0Ae;
@@ -50,6 +57,8 @@ contract ClaimRewardModular {
     address public constant GC_LOCKERS = 0x75f8f7fa4b6DA6De9F4fE972c811b778cefce882;
     address public constant GC_STRATEGIES = 0x3F3F0776D411eb97Cfa4E3eb25F33c01ca4e7Ca8;
     address public constant CURVE_ZAPPER = 0x5De4EF4879F4fe3bBADF2227D2aC5d0E2D76C895;
+    address public constant BALANCER_ZAPPER = 0x0496d64E43BD68045b8e21f89d8A6Ce6A00ce3Ec;
+    address public constant BALANCER_VAULT = 0xBA12222222228d8Ba445958a75a0704d566BF2C8;
 
     uint256 private constant MAX_REWARDS = 8;
     uint256 private constant BASE_UNIT = 1e18;
@@ -150,7 +159,14 @@ contract ClaimRewardModular {
     function claimAndExtraActions(bool[] calldata executeActions, address[] calldata gauges, Actions calldata actions)
         external
     {
-        if (executeActions[0]) _processBribes(actions.claims, msg.sender, actions.lockSDT);
+        if (executeActions[0]) {
+            _processBribes(
+                actions.claims,
+                msg.sender,
+                actions.lockSDT,
+                (actions.staked[depositorsIndex[depositors[CRV]]] && executeActions[2])
+            );
+        }
 
         if (executeActions[1]) {
             _processSdFrax3CRV(actions.swapVeSDTRewards, actions.choice, actions.minAmountSDT, actions.lockSDT);
@@ -164,12 +180,19 @@ contract ClaimRewardModular {
     ////////////////////////////////////////////////////////////////
     /// --- INTERNAL LOGIC
     ///////////////////////////////////////////////////////////////
-    function _processBribes(IMultiMerkleStash.claimParam[] calldata claims, address user, bool lockSDT) internal {
-        uint256 balanceBefore = IERC20(SDT).balanceOf(user);
+    function _processBribes(IMultiMerkleStash.claimParam[] calldata claims, address user, bool lockSDT, bool stakeSdCRV)
+        internal
+    {
+        uint256 balanceBeforeSDT = IERC20(SDT).balanceOf(user);
+        uint256 balanceBeforeCRV = IERC20(CRV).balanceOf(user);
         IMultiMerkleStash(multiMerkleStash).claimMulti(user, claims);
         if (lockSDT) {
-            uint256 diff = IERC20(SDT).balanceOf(user) - balanceBefore;
+            uint256 diff = IERC20(SDT).balanceOf(user) - balanceBeforeSDT;
             if (diff > 0) IERC20(SDT).safeTransferFrom(user, address(this), diff);
+        }
+        if (stakeSdCRV) {
+            uint256 diff = IERC20(CRV).balanceOf(user) - balanceBeforeCRV;
+            if (diff > 0) IERC20(CRV).safeTransferFrom(user, address(this), diff);
         }
     }
 
@@ -220,22 +243,42 @@ contract ClaimRewardModular {
                 address pool = pools[token];
                 uint256 balance = IERC20(token).balanceOf(address(this));
                 if (balance != 0) {
-                    // Buy sdTKN from liquidity pool
+                    // Buy sdTKN from liquidity pool and stake it on gauge or not
                     if (pool != address(0) && lockStatus.buy[poolsIndex[pool]]) {
                         // Don't stake sdTKN on gauge
                         if (!lockStatus.staked[poolsIndex[pool]]) {
-                            _swapTKNForSdTKN(pool, balance, lockStatus.minAmount[poolsIndex[pool]], msg.sender);
+                            if (token == BAL) {
+                                _swapBALForSDBAL(
+                                    pool, balance, lockStatus.minAmount[poolsIndex[pool]], payable(msg.sender)
+                                );
+                            } else {
+                                _swapTKNForSdTKN(pool, balance, lockStatus.minAmount[poolsIndex[pool]], msg.sender);
+                            }
                         }
                         // Stake sdTKN on gauge
                         else {
-                            uint256 received =
-                                _swapTKNForSdTKN(pool, balance, lockStatus.minAmount[poolsIndex[pool]], address(this));
-                            IERC20(IStableSwap(pool).coins(1)).approve(gauge, received);
+                            uint256 received;
+                            if (token == BAL) {
+                                received = _swapBALForSDBAL(
+                                    pool, balance, lockStatus.minAmount[poolsIndex[pool]], payable(address(this))
+                                );
+                                IERC20(SD_BAL).approve(gauge, received);
+                            } else {
+                                received = _swapTKNForSdTKN(
+                                    pool, balance, lockStatus.minAmount[poolsIndex[pool]], address(this)
+                                );
+                                IERC20(IStableSwap(pool).coins(1)).approve(gauge, received);
+                            }
                             ILiquidityGauge(gauge).deposit(received, msg.sender);
                         }
                     }
                     // Mint sdTKN using depositor and stake it on gauge or not
                     else if (depositor != address(0) && lockStatus.locked[depositorsIndex[depositor]]) {
+                        if (token == BAL) {
+                            _swapBALForBPT(balance, lockStatus.minAmount[depositorsIndex[depositor]], address(this));
+                            balance = IERC20(BPT).balanceOf(address(this));
+                            IERC20(BPT).approve(address(depositor), balance);
+                        }
                         IDepositor(depositor).deposit(
                             balance, false, lockStatus.staked[depositorsIndex[depositor]], msg.sender
                         );
@@ -284,6 +327,45 @@ contract ClaimRewardModular {
     {
         // swap TKN for sdTKN
         output = IStableSwap(_pool).exchange(0, 1, _amount, _minAmount, _receiver);
+    }
+
+    function _swapBALForBPT(uint256 amount, uint256 minAmount, address receiver) private {
+        address[] memory assets = new address[](2);
+        assets[0] = BAL;
+        assets[1] = WETH;
+
+        uint256[] memory maxAmountsIn = new uint256[](2);
+        maxAmountsIn[0] = amount;
+        maxAmountsIn[1] = 0; // 0 WETH
+
+        IBalancerVault.JoinPoolRequest memory pr = IBalancerVault.JoinPoolRequest(
+            assets,
+            maxAmountsIn,
+            abi.encode(IBalancerVault.JoinKind.EXACT_TOKENS_IN_FOR_BPT_OUT, maxAmountsIn, minAmount),
+            false
+        );
+        IBalancerVault(BALANCER_VAULT).joinPool(
+            bytes32(0x5c6ee304399dbdb9c8ef030ab642b10820db8f56000200000000000000000014), // poolId
+            address(this),
+            receiver,
+            pr
+        );
+    }
+
+    function _swapBALForSDBAL(address pool, uint256 amount, uint256 minAmount, address payable receiver)
+        private
+        returns (uint256 output)
+    {
+        _swapBALForBPT(amount, minAmount, receiver);
+        amount = IERC20(BPT).balanceOf(address(this));
+        minAmount = amount * (BASE_UNIT - 1e16) / BASE_UNIT;
+
+        IBalancerVault.SingleSwap memory singleSwap = IBalancerVault.SingleSwap(
+            IBalancerStablePool(pool).getPoolId(), IBalancerVault.SwapKind.GIVEN_IN, BPT, SD_BAL, amount, "0x"
+        );
+        IBalancerVault.FundManagement memory funds =
+            IBalancerVault.FundManagement(address(this), false, receiver, false);
+        output = IBalancerVault(BALANCER_VAULT).swap(singleSwap, funds, minAmount, block.timestamp + 36_000);
     }
 
     ////////////////////////////////////////////////////////////////

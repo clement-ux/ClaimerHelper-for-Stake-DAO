@@ -46,9 +46,14 @@ abstract contract Constants {
     address public constant GAUGE_SDCRV = 0x7f50786A0b15723D741727882ee99a0BF34e3466;
     address public constant GAUGE_SDANGLE = 0xE55843a90672f7d8218285e51EE8fF8E233F35d5;
     address public constant GAUGE_SDFXS = 0xF3C6e8fbB946260e8c2a55d48a5e01C82fD63106;
+    address public constant GAUGE_SDBAL = 0x3E8C72655e48591d93e6dfdA16823dB0fF23d859;
+    address public constant GAUGE_SDAPW = 0x9c9d06C7378909C6d0A2A0017Bb409F7fb8004E0;
+    address public constant GAUGE_SDBPT = 0xa291faEEf794df6216f196a63F514B5B22244865;
     address public constant CRV_DEPOSITOR = 0xc1e3Ca8A3921719bE0aE3690A0e036feB4f69191;
     address public constant ANGLE_DEPOSITOR = 0x8A97e8B3389D431182aC67c0DF7D46FF8DCE7121;
     address public constant FXS_DEPOSITOR = 0xFaF3740167B866b571465B063c6B3A71Ba9b6285;
+    address public constant BAL_DEPOSITOR = 0x3e0d44542972859de3CAdaF856B1a4FD351B4D2E;
+    address public constant APW_DEPOSITOR = 0xFe928ca6a9C0cdf658a26A374b7373B9D6CefBCf;
 
     ////////////////////////////////////////////////////////////////
     /// --- CURVE POOL ADDRESSES
