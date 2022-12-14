@@ -10,3 +10,5 @@ test:; @forge fmt && forge test --match-contract ClaimRewardModularTest --match-
 lrep:; @forge coverage --report debug > report.txt
 lcov:; @forge coverage --report lcov
 coverage:; @forge coverage --match-contract ClaimRewardModularTest
+
+gas:; @forge test --gas-report 

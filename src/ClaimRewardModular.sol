@@ -172,15 +172,7 @@ contract ClaimRewardModular {
     function claimAndExtraActions(bool[] calldata executeActions, address[] calldata _gauges, Actions calldata actions)
         external
     {
-        if (executeActions[0]) {
-            //_processBribes(
-            //    actions.claims,
-            //    msg.sender,
-            //    actions.lockSDT,
-            //    (actions.staked[depositorsIndex[depositors[CRV]]] && executeActions[2])
-            //);
-            _processBribes(actions);
-        }
+        if (executeActions[0]) _processBribes(actions);
 
         if (executeActions[1]) {
             _processSdFrax3CRV(actions.swapVeSDTRewards, actions.choice, actions.minAmountSDT, actions.lockSDT);
@@ -262,11 +254,18 @@ contract ClaimRewardModular {
         }
     }
 
+    // without revert on DIFF_LENGTH() test : 969073 gas
+    // with    revert on DIFF_LENGTH() test : 969226 gas
     function _processGaugesClaim(address[] memory _gauges, Actions memory _actions) internal {
         Actions memory lockStatus = _actions;
-        if (lockStatus.locked.length != lockStatus.staked.length) revert DIFFERENT_LENGTH();
-        if (lockStatus.locked.length != lockStatus.buy.length) revert DIFFERENT_LENGTH();
-        if (lockStatus.locked.length != depositorsCount) revert DIFFERENT_LENGTH();
+        if (
+            (lockStatus.locked.length != depositorsCount) //|| (lockStatus.locked.length != poolsCount)
+                || (lockStatus.locked.length != lockStatus.buy.length)
+                || (lockStatus.locked.length != lockStatus.minAmount.length)
+                || (lockStatus.locked.length != lockStatus.staked.length)
+        ) {
+            revert DIFFERENT_LENGTH();
+        }
 
         uint256 length = _gauges.length;
         // Claim rewards token from gauges
