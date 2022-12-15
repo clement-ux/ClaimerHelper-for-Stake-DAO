@@ -45,20 +45,24 @@ contract ClaimRewardModular {
     ////////////////////////////////////////////////////////////////
     /// --- CONSTANTS & IMMUTABLES
     ///////////////////////////////////////////////////////////////
+    /* --- Tokens Addresses --- */
     address public constant BAL = 0xba100000625a3754423978a60c9317c58a424e3D;
     address public constant BPT = 0x5c6Ee304399DBdB9C8Ef030aB642B10820DB8F56;
+    address public constant CRV = 0xD533a949740bb3306d119CC777fa900bA034cd52;
+    address public constant SDT = 0x73968b9a57c6E53d41345FD57a6E6ae27d6CDB2F;
     address public constant FXS = 0x3432B6A60D23Ca0dFCa7761B7ab56459D9C964D0;
+    address public constant FRAX = 0x853d955aCEf822Db058eb8505911ED77F175b99e;
+    address public constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
+    address public constant ANGLE = 0x31429d1856aD1377A8A0079410B297e1a9e214c2;
+
+    /* --- sdTkns Adresses --- */
     address public constant SD_BAL = 0xF24d8651578a55b0C119B9910759a351A3458895;
     address public constant SD_CRV = 0xD1b5651E55D4CeeD36251c61c50C889B36F6abB5;
     address public constant SD_ANGLE = 0x752B4c6e92d96467fE9b9a2522EF07228E00F87c;
     address public constant SD_FXS = 0x402F878BDd1f5C66FdAF0fabaBcF74741B68ac36;
-    address public constant CRV = 0xD533a949740bb3306d119CC777fa900bA034cd52;
-    address public constant ANGLE = 0x31429d1856aD1377A8A0079410B297e1a9e214c2;
-    address public constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
+
     address public constant VE_SDT = 0x0C30476f66034E11782938DF8e4384970B6c9e8a;
-    address public constant SDT = 0x73968b9a57c6E53d41345FD57a6E6ae27d6CDB2F;
     address public constant SDT_FXBP = 0x3e3C6c7db23cdDEF80B694679aaF1bCd9517D0Ae;
-    address public constant FRAX = 0x853d955aCEf822Db058eb8505911ED77F175b99e;
     address public constant FRAX_3CRV = 0xd632f22692FaC7611d2AA1C0D552930D43CAEd3B;
     address public constant SD_FRAX_3CRV = 0x5af15DA84A4a6EDf2d9FA6720De921E1026E37b7;
 
@@ -187,7 +191,8 @@ contract ClaimRewardModular {
     /// --- INTERNAL LOGIC
     ///////////////////////////////////////////////////////////////
 
-    function _processBribes(Actions calldata actions) internal {
+    function _processBribes(Actions calldata _actions) internal {
+        Actions memory actions = _actions;
         IMultiMerkleStash(multiMerkleStash).claimMulti(msg.sender, actions.claims);
         if (actions.stakeBribes) {
             for (uint8 i; i < actions.claims.length; ++i) {
@@ -233,15 +238,11 @@ contract ClaimRewardModular {
         // Choice : 0 -> Obtain FRAX_3CRV
         // Choice : 1 -> Obtain FRAX
         // Choice : 2 -> Obtain SDT
-        uint256 balance = IVault(SD_FRAX_3CRV).balanceOf(msg.sender);
-        IFeeDistributor(veSDTFeeDistributor).claim(msg.sender);
+        uint256 claimed = IFeeDistributor(veSDTFeeDistributor).claim(msg.sender);
         if (swapVeSDTRewards) {
-            uint256 diff = IERC20(SD_FRAX_3CRV).balanceOf(msg.sender) - balance;
-            IERC20(SD_FRAX_3CRV).safeTransferFrom(msg.sender, address(this), diff);
-            balance = IERC20(SD_FRAX_3CRV).balanceOf(address(this));
-            IERC20(SD_FRAX_3CRV).approve(SD_FRAX_3CRV, balance);
-            IVault(SD_FRAX_3CRV).withdraw(balance);
-            balance = IERC20(FRAX_3CRV).balanceOf(address(this));
+            IERC20(SD_FRAX_3CRV).safeTransferFrom(msg.sender, address(this), claimed);
+            IVault(SD_FRAX_3CRV).withdraw(claimed);
+            uint256 balance = IERC20(FRAX_3CRV).balanceOf(address(this));
             if (choice < 1) {
                 IERC20(FRAX_3CRV).transfer(msg.sender, balance);
             } else if (choice < 2) {
@@ -257,12 +258,11 @@ contract ClaimRewardModular {
     // without revert on DIFF_LENGTH() test : 969073 gas
     // with    revert on DIFF_LENGTH() test : 969226 gas
     function _processGaugesClaim(address[] memory _gauges, Actions memory _actions) internal {
-        Actions memory lockStatus = _actions;
+        Actions memory actions = _actions;
         if (
-            (lockStatus.locked.length != depositorsCount) //|| (lockStatus.locked.length != poolsCount)
-                || (lockStatus.locked.length != lockStatus.buy.length)
-                || (lockStatus.locked.length != lockStatus.minAmount.length)
-                || (lockStatus.locked.length != lockStatus.staked.length)
+            (actions.locked.length != depositorsCount) //|| (actions.locked.length != poolsCount)
+                || (actions.locked.length != actions.buy.length) || (actions.locked.length != actions.minAmount.length)
+                || (actions.locked.length != actions.staked.length)
         ) {
             revert DIFFERENT_LENGTH();
         }
@@ -284,15 +284,15 @@ contract ClaimRewardModular {
                 uint256 balance = IERC20(token).balanceOf(address(this));
                 if (balance != 0) {
                     // Buy sdTKN from liquidity pool and stake it on gauge or not
-                    if (pool != address(0) && lockStatus.buy[poolsIndex[pool]]) {
+                    if (pool != address(0) && actions.buy[poolsIndex[pool]]) {
                         // Don't stake sdTKN on gauge
-                        if (!lockStatus.staked[poolsIndex[pool]]) {
+                        if (!actions.staked[poolsIndex[pool]]) {
                             if (token == BAL) {
                                 _swapBALForSDBAL(
-                                    pool, balance, lockStatus.minAmount[poolsIndex[pool]], payable(msg.sender)
+                                    pool, balance, actions.minAmount[poolsIndex[pool]], payable(msg.sender)
                                 );
                             } else {
-                                _swapTKNForSdTKN(pool, balance, lockStatus.minAmount[poolsIndex[pool]], msg.sender);
+                                _swapTKNForSdTKN(pool, balance, actions.minAmount[poolsIndex[pool]], msg.sender);
                             }
                         }
                         // Stake sdTKN on gauge
@@ -300,27 +300,26 @@ contract ClaimRewardModular {
                             uint256 received;
                             if (token == BAL) {
                                 received = _swapBALForSDBAL(
-                                    pool, balance, lockStatus.minAmount[poolsIndex[pool]], payable(address(this))
+                                    pool, balance, actions.minAmount[poolsIndex[pool]], payable(address(this))
                                 );
                                 IERC20(SD_BAL).approve(gauge, received);
                             } else {
-                                received = _swapTKNForSdTKN(
-                                    pool, balance, lockStatus.minAmount[poolsIndex[pool]], address(this)
-                                );
+                                received =
+                                    _swapTKNForSdTKN(pool, balance, actions.minAmount[poolsIndex[pool]], address(this));
                                 IERC20(IStableSwap(pool).coins(1)).approve(gauge, received);
                             }
                             ILiquidityGauge(gauge).deposit(received, msg.sender);
                         }
                     }
                     // Mint sdTKN using depositor and stake it on gauge or not
-                    else if (depositor != address(0) && lockStatus.locked[depositorsIndex[depositor]]) {
+                    else if (depositor != address(0) && actions.locked[depositorsIndex[depositor]]) {
                         if (token == BAL) {
-                            _swapBALForBPT(balance, lockStatus.minAmount[depositorsIndex[depositor]], address(this));
+                            _swapBALForBPT(balance, actions.minAmount[depositorsIndex[depositor]], address(this));
                             balance = IERC20(BPT).balanceOf(address(this));
                             IERC20(BPT).approve(address(depositor), balance);
                         }
                         IDepositor(depositor).deposit(
-                            balance, false, lockStatus.staked[depositorsIndex[depositor]], msg.sender
+                            balance, false, actions.staked[depositorsIndex[depositor]], msg.sender
                         );
                     }
                     // Transfer TKN to user
