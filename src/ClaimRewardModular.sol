@@ -249,6 +249,9 @@ contract ClaimRewardModular {
                     }
                     continue;
                 }
+                unchecked {
+                    ++i;
+                }
             }
         }
     }

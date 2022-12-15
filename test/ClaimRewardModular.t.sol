@@ -277,12 +277,31 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
         stakeBribes = true;
         lockSDT = true;
 
+        vm.startPrank(LOCAL_DEPLOYER);
+        addDepositorsAndPools();
+        claimer.init();
+        vm.stopPrank();
+
+        ClaimRewardModular.Actions memory actions = ClaimRewardModular.Actions(
+            claimParams,
+            stakeBribes,
+            swapVeSDTRewards,
+            choice,
+            minAmountSDT,
+            lockeds,
+            stakeds,
+            buys,
+            minAmounts,
+            lockSDT
+        );
+
         uint256 balanceBeforeGNO = gno.balanceOf(ALICE);
         uint256 balanceBeforeSDT = sdt.balanceOf(ALICE);
         uint256 balanceBefore3CRV = crv3.balanceOf(ALICE);
         uint256 balanceBeforeVeSDT = vesdt.balanceOf(ALICE);
         IVeSDT.LockedBalance memory lockedBefore = vesdt.locked(ALICE);
-        claim(ALICE);
+        vm.prank(ALICE);
+        claimer.claimAndExtraActions(executeActions, gaugesList1, actions);
         uint256 balanceAfterGNO = gno.balanceOf(ALICE);
         uint256 balanceAfterSDT = sdt.balanceOf(ALICE);
         uint256 balanceAfter3CRV = crv3.balanceOf(ALICE);
