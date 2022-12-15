@@ -43,12 +43,15 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
     IERC20 public ageur = IERC20(AG_EUR);
     IERC20 public sdcrv = IERC20(SD_CRV);
     IERC20 public sdbal = IERC20(SD_BAL);
+    IERC20 public sdfxs = IERC20(SD_FXS);
+    IERC20 public sdangle = IERC20(SD_ANGLE);
     IERC20 public bal = IERC20(BAL);
     IVeSDT public vesdt = IVeSDT(VE_SDT);
 
     // Parameters for claimAndExtraActions functions
     bool[] executeActions;
     IMultiMerkleStash.claimParam[] claimParams;
+    IMultiMerkleStash.claimParam[] claimParamsCustom;
     bool stakeBribes;
     bool swapVeSDTRewards;
     uint256 choice;
@@ -92,6 +95,18 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
         sdfrax3crv.approve(address(claimer), type(uint256).max);
         sdt.approve(address(claimer), type(uint256).max);
         vm.stopPrank();
+
+        vm.startPrank(BOB);
+        sdcrv.approve(address(claimer), type(uint256).max);
+        sdbal.approve(address(claimer), type(uint256).max);
+        sdfxs.approve(address(claimer), type(uint256).max);
+        sdangle.approve(address(claimer), type(uint256).max);
+        vm.stopPrank();
+
+        deal(SD_CRV, claimer.multiMerkleStash(), 1_000_000e18);
+        deal(SD_BAL, claimer.multiMerkleStash(), 1_000_000e18);
+        deal(SD_ANGLE, claimer.multiMerkleStash(), 1_000_000e18);
+        deal(SD_FXS, claimer.multiMerkleStash(), 1_000_000e18);
 
         gaugesList1.push(GAUGE_GUNI_AGEUR_ETH);
         gaugesList1.push(GAUGE_SDCRV);
@@ -279,6 +294,88 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
         assertGt(balanceAfter3CRV, balanceBefore3CRV, "3");
         assertGt(balanceAfterVeSDT, balanceBeforeVeSDT, "4");
         assertEq(lockedAfter.amount, lockedBefore.amount + int256(amountToClaimSDT), "5");
+    }
+
+    function testClaimBribesSdTKNSimple() public {
+        updateRoot();
+
+        executeActions[0] = true; // claim bribes
+
+        // Create the Actions structure
+        ClaimRewardModular.Actions memory actions = ClaimRewardModular.Actions(
+            claimParamsCustom,
+            stakeBribes,
+            swapVeSDTRewards,
+            choice,
+            minAmountSDT,
+            lockeds,
+            stakeds,
+            buys,
+            minAmounts,
+            lockSDT
+        );
+
+        vm.startPrank(LOCAL_DEPLOYER);
+        //addDepositorsAndPools();
+        claimer.init();
+        vm.stopPrank();
+
+        uint256 balanceBeforeSDCRV = sdcrv.balanceOf(BOB);
+        uint256 balanceBeforeSDBAL = sdbal.balanceOf(BOB);
+        uint256 balanceBeforeSDFXS = sdfxs.balanceOf(BOB);
+        uint256 balanceBeforeSDANGLE = sdangle.balanceOf(BOB);
+        vm.prank(BOB);
+        claimer.claimAndExtraActions(executeActions, gaugesList2, actions);
+
+        assertEq(sdcrv.balanceOf(BOB), balanceBeforeSDCRV + amountToClaimCustomSdCRV);
+        assertEq(sdbal.balanceOf(BOB), balanceBeforeSDBAL + amountToClaimCustomSdBAL);
+        assertEq(sdfxs.balanceOf(BOB), balanceBeforeSDFXS + amountToClaimCustomSdFXS);
+        assertEq(sdangle.balanceOf(BOB), balanceBeforeSDANGLE + amountToClaimCustomSdANGLE);
+    }
+
+    function testClaimBribesSdTKNStake() public {
+        updateRoot();
+        executeActions[0] = true; // claim bribes
+        stakeBribes = true;
+        stakeds[0] = true;
+        stakeds[1] = true;
+        stakeds[2] = true; // crv
+        stakeds[3] = true; // bal
+
+        vm.startPrank(LOCAL_DEPLOYER);
+        addDepositorsAndPools();
+        claimer.init();
+        vm.stopPrank();
+
+        // Create the Actions structure
+        ClaimRewardModular.Actions memory actions = ClaimRewardModular.Actions(
+            claimParamsCustom,
+            stakeBribes,
+            swapVeSDTRewards,
+            choice,
+            minAmountSDT,
+            lockeds,
+            stakeds,
+            buys,
+            minAmounts,
+            lockSDT
+        );
+
+        uint256 balanceBeforeGaugeSdCRV = IERC20(GAUGE_SDCRV).balanceOf(BOB);
+        uint256 balanceBeforeGaugeSdBAL = IERC20(GAUGE_SDBAL).balanceOf(BOB);
+        uint256 balanceBeforeGaugeSdFXS = IERC20(GAUGE_SDFXS).balanceOf(BOB);
+        uint256 balanceBeforeGaugeSdANGLE = IERC20(GAUGE_SDANGLE).balanceOf(BOB);
+        vm.prank(BOB);
+        claimer.claimAndExtraActions(executeActions, gaugesList2, actions);
+        uint256 balanceAfterGaugeSdCRV = IERC20(GAUGE_SDCRV).balanceOf(BOB);
+        uint256 balanceAfterGaugeSdBAL = IERC20(GAUGE_SDBAL).balanceOf(BOB);
+        uint256 balanceAfterGaugeSdFXS = IERC20(GAUGE_SDFXS).balanceOf(BOB);
+        uint256 balanceAfterGaugeSdANGLE = IERC20(GAUGE_SDANGLE).balanceOf(BOB);
+
+        assertEq(balanceAfterGaugeSdBAL, balanceBeforeGaugeSdBAL + amountToClaimCustomSdBAL, "1");
+        assertEq(balanceAfterGaugeSdCRV, balanceBeforeGaugeSdCRV + amountToClaimCustomSdCRV, "2");
+        assertEq(balanceAfterGaugeSdFXS, balanceBeforeGaugeSdFXS + amountToClaimCustomSdFXS, "3");
+        assertEq(balanceAfterGaugeSdANGLE, balanceBeforeGaugeSdANGLE + amountToClaimCustomSdANGLE, "4");
     }
 
     ////////////////////////////////////////////////////////////////
@@ -717,6 +814,19 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
         // Bribes in SDT
         claimParams.push(IMultiMerkleStash.claimParam(SDT, claimerSDTIndex, amountToClaimSDT, merkleProofSDT));
 
+        // Bribes in sdCRV
+        claimParamsCustom.push(
+            IMultiMerkleStash.claimParam(SD_CRV, 0, amountToClaimCustomSdCRV, merkleProofCustomSdCRV)
+        );
+        claimParamsCustom.push(
+            IMultiMerkleStash.claimParam(SD_BAL, 0, amountToClaimCustomSdBAL, merkleProofCustomSdBAL)
+        );
+        claimParamsCustom.push(
+            IMultiMerkleStash.claimParam(SD_ANGLE, 0, amountToClaimCustomSdANGLE, merkleProofCustomSdANGLE)
+        );
+        claimParamsCustom.push(
+            IMultiMerkleStash.claimParam(SD_FXS, 0, amountToClaimCustomSdFXS, merkleProofCustomSdFXS)
+        );
         // Params for rewards from veSDT
         swapVeSDTRewards = false;
         choice = 0;
@@ -758,6 +868,10 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
         claimer.addPool(ANGLE, POOL_ANGLE_SDANGLE);
         claimer.addPool(CRV, POOL_CRV_SDCRV);
         claimer.addPool(BAL, POOL_BAL_SDBAL);
+        claimer.addSdGauge(SD_FXS, GAUGE_SDFXS);
+        claimer.addSdGauge(SD_ANGLE, GAUGE_SDANGLE);
+        claimer.addSdGauge(SD_CRV, GAUGE_SDCRV);
+        claimer.addSdGauge(SD_BAL, GAUGE_SDBAL);
     }
 
     function claimableAmount(address user)
@@ -787,5 +901,12 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
         claimableBAL = ILiquidityGauge(GAUGE_SDBAL).claimable_reward(user, BAL);
     }
 
-    function calculSDFRAX3CRVObtained() public view returns (uint256) {}
+    function updateRoot() public {
+        vm.startPrank(IMultiMerkleStash(claimer.multiMerkleStash()).owner());
+        IMultiMerkleStash(claimer.multiMerkleStash()).updateMerkleRoot(SD_CRV, merkleRootCustomSdCRV);
+        IMultiMerkleStash(claimer.multiMerkleStash()).updateMerkleRoot(SD_BAL, merkleRootCustomSdBAL);
+        IMultiMerkleStash(claimer.multiMerkleStash()).updateMerkleRoot(SD_ANGLE, merkleRootCustomSdANGLE);
+        IMultiMerkleStash(claimer.multiMerkleStash()).updateMerkleRoot(SD_FXS, merkleRootCustomSdFXS);
+        vm.stopPrank();
+    }
 }

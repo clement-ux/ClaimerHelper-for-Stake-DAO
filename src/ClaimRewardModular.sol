@@ -110,13 +110,15 @@ contract ClaimRewardModular {
     ////////////////////////////////////////////////////////////////
     /// --- EVENTS
     ///////////////////////////////////////////////////////////////
-
-    event GaugeEnabled(address gauge);
-    event GaugeDisabled(address gauge);
-    event DepositorEnabled(address token, address depositor);
-    event PoolAdded(address token, address depositor);
+    event DepositorAdded(address token, address depositor);
+    event DepositorUpdated(address token, address depositor);
+    event PoolAdded(address token, address pool);
+    event PoolUpdated(address token, address pool);
+    event GaugeAdded(address token, address gauge);
+    event GaugeUpdated(address token, address gauge);
     event Recovered(address token, uint256 amount);
     event RewardsClaimed(address[] gauges);
+    event BlacklistGauge(address gauge, bool blacklisted);
     event GovernanceChanged(address oldG, address newG);
 
     ////////////////////////////////////////////////////////////////
@@ -169,6 +171,7 @@ contract ClaimRewardModular {
                 ++i;
             }
         }
+        emit RewardsClaimed(_gauges);
     }
 
     // user need to approve this contract for the following token :
@@ -191,42 +194,58 @@ contract ClaimRewardModular {
     /// --- INTERNAL LOGIC
     ///////////////////////////////////////////////////////////////
 
+    // user need to approve this address for sdTKN
     function _processBribes(Actions calldata _actions) internal {
         Actions memory actions = _actions;
         IMultiMerkleStash(multiMerkleStash).claimMulti(msg.sender, actions.claims);
         if (actions.stakeBribes) {
-            for (uint8 i; i < actions.claims.length; ++i) {
+            for (uint8 i; i < actions.claims.length;) {
                 if (actions.claims[i].token == SDT) {
                     if (actions.lockSDT) {
                         IERC20(SDT).safeTransferFrom(msg.sender, address(this), actions.claims[i].amount);
                     }
+                    unchecked {
+                        ++i;
+                    }
                     continue;
                 }
                 if (actions.claims[i].token == SD_CRV) {
-                    if (gauges[CRV] != address(0) && actions.staked[gaugesIndex[gauges[CRV]]]) {
+                    if (gauges[SD_CRV] != address(0) && actions.staked[gaugesIndex[gauges[SD_CRV]]]) {
                         IERC20(SD_CRV).safeTransferFrom(msg.sender, address(this), actions.claims[i].amount);
-                        ILiquidityGauge(gauges[CRV]).deposit(actions.claims[i].amount, msg.sender);
+                        ILiquidityGauge(gauges[SD_CRV]).deposit(actions.claims[i].amount, msg.sender);
+                    }
+                    unchecked {
+                        ++i;
                     }
                     continue;
                 }
                 if (actions.claims[i].token == SD_BAL) {
-                    if (gauges[BAL] != address(0) && actions.staked[gaugesIndex[gauges[BAL]]]) {
+                    if (gauges[SD_BAL] != address(0) && actions.staked[gaugesIndex[gauges[SD_BAL]]]) {
                         IERC20(SD_BAL).safeTransferFrom(msg.sender, address(this), actions.claims[i].amount);
-                        ILiquidityGauge(gauges[BAL]).deposit(actions.claims[i].amount, msg.sender);
+                        ILiquidityGauge(gauges[SD_BAL]).deposit(actions.claims[i].amount, msg.sender);
+                    }
+                    unchecked {
+                        ++i;
                     }
                     continue;
                 }
                 if (actions.claims[i].token == SD_ANGLE) {
-                    if (gauges[ANGLE] != address(0) && actions.staked[gaugesIndex[gauges[ANGLE]]]) {
+                    if (gauges[SD_ANGLE] != address(0) && actions.staked[gaugesIndex[gauges[SD_ANGLE]]]) {
                         IERC20(SD_ANGLE).safeTransferFrom(msg.sender, address(this), actions.claims[i].amount);
-                        ILiquidityGauge(gauges[ANGLE]).deposit(actions.claims[i].amount, msg.sender);
+                        ILiquidityGauge(gauges[SD_ANGLE]).deposit(actions.claims[i].amount, msg.sender);
+                    }
+                    unchecked {
+                        ++i;
                     }
                     continue;
                 }
                 if (actions.claims[i].token == SD_FXS) {
-                    if (gauges[FXS] != address(0) && actions.staked[gaugesIndex[gauges[FXS]]]) {
+                    if (gauges[SD_FXS] != address(0) && actions.staked[gaugesIndex[gauges[SD_FXS]]]) {
                         IERC20(SD_FXS).safeTransferFrom(msg.sender, address(this), actions.claims[i].amount);
-                        ILiquidityGauge(gauges[FXS]).deposit(actions.claims[i].amount, msg.sender);
+                        ILiquidityGauge(gauges[SD_FXS]).deposit(actions.claims[i].amount, msg.sender);
+                    }
+                    unchecked {
+                        ++i;
                     }
                     continue;
                 }
@@ -261,12 +280,11 @@ contract ClaimRewardModular {
         Actions memory actions = _actions;
         if (
             (actions.locked.length != depositorsCount) //|| (actions.locked.length != poolsCount)
-                || (actions.locked.length != actions.buy.length) || (actions.locked.length != actions.minAmount.length)
-                || (actions.locked.length != actions.staked.length)
+                || (actions.locked.length != actions.staked.length) || (actions.locked.length != actions.buy.length)
+                || (actions.locked.length != actions.minAmount.length)
         ) {
             revert DIFFERENT_LENGTH();
         }
-
         uint256 length = _gauges.length;
         // Claim rewards token from gauges
         for (uint8 index; index < length;) {
@@ -337,6 +355,7 @@ contract ClaimRewardModular {
                 ++index;
             }
         }
+        emit RewardsClaimed(_gauges);
     }
 
     function _processSDT(bool lockSDT) internal {
@@ -417,7 +436,7 @@ contract ClaimRewardModular {
         depositorsIndex[depositor] = depositorsCount;
         ++depositorsCount;
         IERC20(token).approve(depositor, type(uint256).max);
-        emit DepositorEnabled(token, depositor);
+        emit DepositorAdded(token, depositor);
     }
 
     function updateDepositor(address token, address newDepositor) external onlyGovernance {
@@ -427,7 +446,7 @@ contract ClaimRewardModular {
         IERC20(token).approve(depositors[token], 0);
         depositors[token] = newDepositor;
         IERC20(token).approve(newDepositor, type(uint256).max);
-        emit DepositorEnabled(token, newDepositor);
+        emit DepositorUpdated(token, newDepositor);
     }
 
     function addPool(address token, address pool) external onlyGovernance {
@@ -448,33 +467,34 @@ contract ClaimRewardModular {
         IERC20(token).approve(pools[token], 0);
         pools[token] = newPool;
         IERC20(token).approve(newPool, type(uint256).max);
-        emit PoolAdded(token, newPool);
+        emit PoolUpdated(token, newPool);
     }
 
-    function addGauge(address token, address gauge) external onlyGovernance {
-        if (token == address(0)) revert ADDRESS_NULL();
+    function addSdGauge(address sdToken, address gauge) external onlyGovernance {
+        if (sdToken == address(0)) revert ADDRESS_NULL();
         if (gauge == address(0)) revert ADDRESS_NULL();
-        if (gauges[token] != address(0)) revert ALREADY_ADDED();
-        gauges[token] = gauge;
+        if (gauges[sdToken] != address(0)) revert ALREADY_ADDED();
+        gauges[sdToken] = gauge;
         gaugesIndex[gauge] = gaugesCount;
         ++gaugesCount;
-        IERC20(token).approve(gauge, type(uint256).max);
-        emit PoolAdded(token, gauge);
+        IERC20(sdToken).approve(gauge, type(uint256).max);
+        emit GaugeAdded(sdToken, gauge);
     }
 
-    function updateGauge(address token, address newGauge) external onlyGovernance {
-        if (token == address(0)) revert ADDRESS_NULL();
+    function updateSdGauge(address sdToken, address newGauge) external onlyGovernance {
+        if (sdToken == address(0)) revert ADDRESS_NULL();
         if (newGauge == address(0)) revert ADDRESS_NULL();
-        if (gauges[token] == address(0)) revert NOT_ADDED();
-        IERC20(token).approve(gauges[token], 0);
-        gauges[token] = newGauge;
-        IERC20(token).approve(newGauge, type(uint256).max);
-        emit PoolAdded(token, newGauge);
+        if (gauges[sdToken] == address(0)) revert NOT_ADDED();
+        IERC20(sdToken).approve(gauges[sdToken], 0);
+        gauges[sdToken] = newGauge;
+        IERC20(sdToken).approve(newGauge, type(uint256).max);
+        emit GaugeUpdated(sdToken, newGauge);
     }
 
     function toggleBlacklistOnGauge(address gauge) external onlyGovernance {
         if (gauge == address(0)) revert ADDRESS_NULL();
         blacklisted[gauge] = !blacklisted[gauge];
+        emit BlacklistGauge(gauge, blacklisted[gauge]);
     }
 
     function setGovernance(address _governance) external onlyGovernance {
@@ -495,5 +515,12 @@ contract ClaimRewardModular {
     function setVeSDTFeeDistributor(address _veSDTFeeDistributor) external onlyGovernance {
         if (_veSDTFeeDistributor == address(0)) revert ADDRESS_NULL();
         veSDTFeeDistributor = _veSDTFeeDistributor;
+    }
+
+    function rescueERC20(address _token, uint256 _amount, address _recipient) external onlyGovernance {
+        if (_recipient == address(0)) revert ADDRESS_NULL();
+        IERC20(_token).safeTransfer(_recipient, _amount);
+
+        emit Recovered(_token, _amount);
     }
 }

@@ -2,23 +2,40 @@
 pragma solidity ^0.8.17;
 
 abstract contract MerkleProofFile {
+    /* --- MERKLE ROOTS --- */
+    //bytes32 public merkleRootCustomSDT = 0x1f3c9a5820882ebaa1bd305c6eb31d058b7627ef2d74140a65da8781b421c216;
+    //bytes32 public merkleRootCustomCRV3 = 0xd131334dabaa450efdb0707b83f75664cf6fc8c8e5f4ae78aff6767e220824f9;
+    bytes32 public merkleRootCustomSdBAL = 0xe42f800bf8099cb65f34935cb00a6aad0b0152b430a466134d0251cc46c4f304;
+    bytes32 public merkleRootCustomSdFXS = 0x5bf53084c48998e4e20eb3b83e6a2f13a867e2b128e0dce0c35766f34b65b145;
+    bytes32 public merkleRootCustomSdCRV = 0x1a9806f60ca2b1a6fcd749a09a307d59436aa3d0e2fbc478a1742b5074f79ab7;
+    bytes32 public merkleRootCustomSdANGLE = 0x5d9c79d5357b3cba4d9c4fe8093eb79ea586281c5e7dc4bf56afcaaf5827943f;
+
     bytes32[] public merkleProofSDT;
-    //bytes32[] public merkleProofSDT2;
     bytes32[] public merkleProof3CRV1;
     bytes32[] public merkleProofGNO;
 
+    /* --- Custom proofs --- */
+    //bytes32[] public merkleProofCustomSDT;
+    //bytes32[] public merkleProofCustomCRV3;
+    bytes32[] public merkleProofCustomSdBAL;
+    bytes32[] public merkleProofCustomSdFXS;
+    bytes32[] public merkleProofCustomSdCRV;
+    bytes32[] public merkleProofCustomSdANGLE;
+
     uint256 public amountToClaimSDT = 0x9a40dda7f29c718000;
-    //uint256 public amountToClaimSDT2 = 0x02a5602b3bb4a1c0c000;
     uint256 public amountToClaim3CRV1 = 0x01c3ef89bd62acd000;
     uint256 public amountToClaimGNO = 0x0dda11f259a92000;
+    /* --- Custom amount to claim --- */
+    uint256 public amountToClaimCustomSdBAL = 0x1c1e50939d6d98930000;
+    uint256 public amountToClaimCustomSdFXS = 0x02b66a6ff03f690b0000;
+    uint256 public amountToClaimCustomSdCRV = 0x03472a0d1e0b2fd55000;
+    uint256 public amountToClaimCustomSdANGLE = 0x0677e0b5f4a1b7dc7000;
 
     address public claimerSDT = 0x1A162A5FdaEbb0113f7B83Ed87A43BCF0B6a4D1E;
-    //address public claimerSDT2 = 0xc24CFD03cbc1b7Ff8EdAc1C85A6b9aE5Bf65869a;
     address public claimer3CRV1 = 0x1A162A5FdaEbb0113f7B83Ed87A43BCF0B6a4D1E;
     address public claimerGNO = 0x1A162A5FdaEbb0113f7B83Ed87A43BCF0B6a4D1E;
 
     uint256 public claimerSDTIndex = 272;
-    //uint256 public claimerSDT2Index = 2;
     uint256 public claimer3CRV1Index = 72;
     uint256 public claimerGNOIndex = 6;
 
@@ -33,16 +50,6 @@ abstract contract MerkleProofFile {
         merkleProofSDT.push(0x7d66155b4f0fa02c5c7b0d3adf3e95a305257be260fd268a949ac4c0680ce055);
         merkleProofSDT.push(0xa47c0a007637bf20b38cafc6fa59b14276e3e2da57a8474517eee55a6104a99f);
         merkleProofSDT.push(0xf138833fbe1b2ec7ba1d57e509ca9c603ed1d5ce854d06a43b7ef91ba78d59c1);
-
-        // merkleProof SDT 2
-        //merkleProofSDT2.push(0x67a104dccda4338a290eef966f24f79db9167b74b1eebb9ddcd7cd94d0cf4873);
-        //merkleProofSDT2.push(0xea156ff9843f309ba9989cf599736ea4a0dbb764daaabcc24dffe0015c455655);
-        //merkleProofSDT2.push(0x0d6f2da29b661f38dfac0b2d0ac025af11d1af8ff6b66ca1b758d26c00bbfe63);
-        //merkleProofSDT2.push(0x16bbadab677b19506684824340e436d3eb7edcd3628cad0fd71417f10ca275e3);
-        //merkleProofSDT2.push(0x782412a2752c38af0ba7ca18fd65ee104e7f3d8f88edcbf15558065e9ce2e975);
-        //merkleProofSDT2.push(0xa7b1a33b3ab26f5c80a16f6a74fddc26c56a51ef74aa3efcc68bc90d654f18cf);
-        //merkleProofSDT2.push(0x5b99a548d9b741ef61a60af81f9374015c33df16b470c9d5d2f390193f6540ba);
-        //merkleProofSDT2.push(0x8d2ec85902012b838af275701dbd086d8864a52d0e1eb5dc6d897b4855f38b9b);
 
         // merkleProof 3CRV 1
         merkleProof3CRV1.push(0x2bedc7691e4888e9a9ca6e17ca67be22cdb6e76552e8e829bd276928da4df6cd);
@@ -61,5 +68,18 @@ abstract contract MerkleProofFile {
         merkleProofGNO.push(0x21b522299b2979859c05915fa4868264989dd4402f4f089186833c22c54b110f);
         merkleProofGNO.push(0x85b7c23af73fb1fe575df1bb8662a9690a944def56bb639633d6725754425be9);
         merkleProofGNO.push(0xa2c1e3fac81b956ac05c30c780ad4252a4184e00c62dd252140d2f160454c028);
+
+        /* --- Push merkle proof for custom --- */
+        //merkleProofCustomSdBAL.push(0x5dae2f4764593d90386bc560a5da1cac66ecad1f67db7d7dec46dea5491aab6c);
+        //merkleProofCustomSdBAL.push(0xbf932a8285959126abed7e0a0a47a1a70ade3ae6e327a27240701d4060e4ad14);
+
+        //merkleProofCustomSdFXS.push(0x5dae2f4764593d90386bc560a5da1cac66ecad1f67db7d7dec46dea5491aab6c);
+        //merkleProofCustomSdFXS.push(0xbf932a8285959126abed7e0a0a47a1a70ade3ae6e327a27240701d4060e4ad14);
+
+        merkleProofCustomSdANGLE.push(0xecaad49ab1865b07696e89432b2caeeb1bad04a9035589316b98ef29a3613514);
+        //merkleProofCustomSdANGLE.push(0x3219a77ae4074f82c9a8587cb9e480e2b033ecea2f958f9fe180a37a9298c3a6);
+
+        merkleProofCustomSdCRV.push(0x66f8ff7a5ed23e6d18736144fc22fdf26a231196af930abaa232633c896b43d1);
+        //merkleProofCustomSdCRV.push(0x3219a77ae4074f82c9a8587cb9e480e2b033ecea2f958f9fe180a37a9298c3a6);
     }
 }

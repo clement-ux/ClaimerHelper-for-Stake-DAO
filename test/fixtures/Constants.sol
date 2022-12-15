@@ -77,6 +77,7 @@ abstract contract Constants {
     /// --- ANGLE PROTOCOL
     ///////////////////////////////////////////////////////////////
     address public constant ANGLE = 0x31429d1856aD1377A8A0079410B297e1a9e214c2;
+    address public constant SD_ANGLE = 0x752B4c6e92d96467fE9b9a2522EF07228E00F87c;
     address public constant VEANGLE = 0x0C462Dbb9EC8cD1630f1728B2CFD2769d09f0dd5;
     address public constant AG_EUR = 0x1a7e4e63778B4f12a199C062f3eFdD288afCBce8;
     address public constant ANGLE_SMART_WALLET_CHECKER = 0xAa241Ccd398feC742f463c534a610529dCC5888E;
@@ -127,6 +128,7 @@ abstract contract Constants {
     /// --- FRAX PROTOCOL
     ///////////////////////////////////////////////////////////////
     address public constant FRAX = 0x853d955aCEf822Db058eb8505911ED77F175b99e;
+    address public constant SD_FXS = 0x402F878BDd1f5C66FdAF0fabaBcF74741B68ac36;
     address public constant FXS = 0x3432B6A60D23Ca0dFCa7761B7ab56459D9C964D0;
     address public constant FRAX_3CRV = 0xd632f22692FaC7611d2AA1C0D552930D43CAEd3B;
     address public constant VE_FXS = 0xc8418aF6358FFddA74e09Ca9CC3Fe03Ca6aDC5b0;
