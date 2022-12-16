@@ -58,8 +58,8 @@ contract ClaimRewardModular {
     /* --- sdTkns Adresses --- */
     address public constant SD_BAL = 0xF24d8651578a55b0C119B9910759a351A3458895;
     address public constant SD_CRV = 0xD1b5651E55D4CeeD36251c61c50C889B36F6abB5;
-    address public constant SD_ANGLE = 0x752B4c6e92d96467fE9b9a2522EF07228E00F87c;
     address public constant SD_FXS = 0x402F878BDd1f5C66FdAF0fabaBcF74741B68ac36;
+    address public constant SD_ANGLE = 0x752B4c6e92d96467fE9b9a2522EF07228E00F87c;
 
     address public constant VE_SDT = 0x0C30476f66034E11782938DF8e4384970B6c9e8a;
     address public constant SDT_FXBP = 0x3e3C6c7db23cdDEF80B694679aaF1bCd9517D0Ae;
@@ -72,7 +72,6 @@ contract ClaimRewardModular {
     address public constant BALANCER_ZAPPER = 0x0496d64E43BD68045b8e21f89d8A6Ce6A00ce3Ec;
     address public constant BALANCER_VAULT = 0xBA12222222228d8Ba445958a75a0704d566BF2C8;
 
-    uint256 private constant MAX_REWARDS = 8;
     uint256 private constant BASE_UNIT = 1e18;
 
     ////////////////////////////////////////////////////////////////
@@ -96,6 +95,7 @@ contract ClaimRewardModular {
     mapping(address => uint256) public poolsIndex;
     mapping(address => address) public gauges;
     mapping(address => uint256) public gaugesIndex;
+    mapping(address => address) public tokenSdToken;
     mapping(address => bool) public blacklisted;
 
     ////////////////////////////////////////////////////////////////
@@ -125,7 +125,6 @@ contract ClaimRewardModular {
     /// --- ERRORS
     ///////////////////////////////////////////////////////////////
 
-    error GAUGE_NOT_ENABLE();
     error BLACKLISTED_GAUGE();
 
     error NOT_ADDED();
@@ -149,12 +148,16 @@ contract ClaimRewardModular {
     function init() external onlyGovernance {
         if (initialization) revert ALREADY_INITIALIZED();
         initialization = true;
-        IERC20(SDT).approve(VE_SDT, type(uint256).max);
-        IERC20(BAL).approve(BALANCER_VAULT, type(uint256).max);
-        IERC20(BPT).approve(BALANCER_VAULT, type(uint256).max);
-        IERC20(FRAX).approve(CURVE_ZAPPER, type(uint256).max);
-        IERC20(FRAX_3CRV).approve(FRAX_3CRV, type(uint256).max);
-        IERC20(SD_FRAX_3CRV).approve(SD_FRAX_3CRV, type(uint256).max);
+        IERC20(SDT).safeApprove(VE_SDT, type(uint256).max);
+        IERC20(BAL).safeApprove(BALANCER_VAULT, type(uint256).max);
+        IERC20(BPT).safeApprove(BALANCER_VAULT, type(uint256).max);
+        IERC20(FRAX).safeApprove(CURVE_ZAPPER, type(uint256).max);
+        IERC20(FRAX_3CRV).safeApprove(FRAX_3CRV, type(uint256).max);
+        IERC20(SD_FRAX_3CRV).safeApprove(SD_FRAX_3CRV, type(uint256).max);
+        tokenSdToken[CRV] = SD_CRV;
+        tokenSdToken[BAL] = SD_BAL;
+        tokenSdToken[FXS] = SD_FXS;
+        tokenSdToken[ANGLE] = SD_ANGLE;
     }
 
     ////////////////////////////////////////////////////////////////
@@ -174,16 +177,14 @@ contract ClaimRewardModular {
         emit RewardsClaimed(_gauges);
     }
 
-    // user need to approve this contract for the following token :
-    // SDT, SD_FRAX_3CRV
+    // user need to safeApprove this contract for the following token :
+    // SDT, SD_FRAX_3CRV, all sdTKN that user want to claim
     function claimAndExtraActions(bool[] calldata executeActions, address[] calldata _gauges, Actions calldata actions)
         external
     {
         if (executeActions[0]) _processBribes(actions);
 
-        if (executeActions[1]) {
-            _processSdFrax3CRV(actions.swapVeSDTRewards, actions.choice, actions.minAmountSDT, actions.lockSDT);
-        }
+        if (executeActions[1]) _processSdFrax3CRV(actions);
 
         if (executeActions[2]) _processGaugesClaim(_gauges, actions);
 
@@ -194,60 +195,22 @@ contract ClaimRewardModular {
     /// --- INTERNAL LOGIC
     ///////////////////////////////////////////////////////////////
 
-    // user need to approve this address for sdTKN
     function _processBribes(Actions calldata _actions) internal {
         Actions memory actions = _actions;
         IMultiMerkleStash(multiMerkleStash).claimMulti(msg.sender, actions.claims);
         if (actions.stakeBribes) {
-            for (uint8 i; i < actions.claims.length;) {
-                if (actions.claims[i].token == SDT) {
-                    if (actions.lockSDT) {
-                        IERC20(SDT).safeTransferFrom(msg.sender, address(this), actions.claims[i].amount);
-                    }
-                    unchecked {
-                        ++i;
-                    }
-                    continue;
-                }
-                if (actions.claims[i].token == SD_CRV) {
-                    if (gauges[SD_CRV] != address(0) && actions.staked[gaugesIndex[gauges[SD_CRV]]]) {
-                        IERC20(SD_CRV).safeTransferFrom(msg.sender, address(this), actions.claims[i].amount);
-                        ILiquidityGauge(gauges[SD_CRV]).deposit(actions.claims[i].amount, msg.sender);
-                    }
-                    unchecked {
-                        ++i;
-                    }
-                    continue;
-                }
-                if (actions.claims[i].token == SD_BAL) {
-                    if (gauges[SD_BAL] != address(0) && actions.staked[gaugesIndex[gauges[SD_BAL]]]) {
-                        IERC20(SD_BAL).safeTransferFrom(msg.sender, address(this), actions.claims[i].amount);
-                        ILiquidityGauge(gauges[SD_BAL]).deposit(actions.claims[i].amount, msg.sender);
-                    }
-                    unchecked {
-                        ++i;
-                    }
-                    continue;
-                }
-                if (actions.claims[i].token == SD_ANGLE) {
-                    if (gauges[SD_ANGLE] != address(0) && actions.staked[gaugesIndex[gauges[SD_ANGLE]]]) {
-                        IERC20(SD_ANGLE).safeTransferFrom(msg.sender, address(this), actions.claims[i].amount);
-                        ILiquidityGauge(gauges[SD_ANGLE]).deposit(actions.claims[i].amount, msg.sender);
-                    }
-                    unchecked {
-                        ++i;
-                    }
-                    continue;
-                }
-                if (actions.claims[i].token == SD_FXS) {
-                    if (gauges[SD_FXS] != address(0) && actions.staked[gaugesIndex[gauges[SD_FXS]]]) {
-                        IERC20(SD_FXS).safeTransferFrom(msg.sender, address(this), actions.claims[i].amount);
-                        ILiquidityGauge(gauges[SD_FXS]).deposit(actions.claims[i].amount, msg.sender);
-                    }
-                    unchecked {
-                        ++i;
-                    }
-                    continue;
+            uint256 length = actions.claims.length;
+            for (uint8 i; i < length;) {
+                if (actions.claims[i].token == SDT && actions.lockSDT) {
+                    IERC20(SDT).safeTransferFrom(msg.sender, address(this), actions.claims[i].amount);
+                } else if (
+                    gauges[actions.claims[i].token] != address(0)
+                        && actions.staked[gaugesIndex[gauges[actions.claims[i].token]]]
+                ) {
+                    IERC20(actions.claims[i].token).safeTransferFrom(
+                        msg.sender, address(this), actions.claims[i].amount
+                    );
+                    ILiquidityGauge(gauges[actions.claims[i].token]).deposit(actions.claims[i].amount, msg.sender);
                 }
                 unchecked {
                     ++i;
@@ -256,33 +219,32 @@ contract ClaimRewardModular {
         }
     }
 
-    function _processSdFrax3CRV(bool swapVeSDTRewards, uint256 choice, uint256 minAmountSDT, bool lockSDT) internal {
+    function _processSdFrax3CRV(Actions calldata _actions) internal {
         // Choice : 0 -> Obtain FRAX_3CRV
         // Choice : 1 -> Obtain FRAX
         // Choice : 2 -> Obtain SDT
+        Actions memory actions = _actions;
         uint256 claimed = IFeeDistributor(veSDTFeeDistributor).claim(msg.sender);
-        if (swapVeSDTRewards) {
+        if (actions.swapVeSDTRewards) {
             IERC20(SD_FRAX_3CRV).safeTransferFrom(msg.sender, address(this), claimed);
             IVault(SD_FRAX_3CRV).withdraw(claimed);
             uint256 balance = IERC20(FRAX_3CRV).balanceOf(address(this));
-            if (choice < 1) {
-                IERC20(FRAX_3CRV).transfer(msg.sender, balance);
-            } else if (choice < 2) {
+            if (actions.choice < 1) {
+                IERC20(FRAX_3CRV).safeTransfer(msg.sender, balance);
+            } else if (actions.choice < 2) {
                 IStableSwap(FRAX_3CRV).remove_liquidity_one_coin(balance, 0, 0, msg.sender);
             } else {
                 uint256 received = IStableSwap(FRAX_3CRV).remove_liquidity_one_coin(balance, 0, 0, address(this));
-                if (!lockSDT) _swapFRAXForSDT(received, minAmountSDT, msg.sender);
-                else _swapFRAXForSDT(received, minAmountSDT, address(this));
+                if (!actions.lockSDT) _swapFRAXForSDT(received, actions.minAmountSDT, msg.sender);
+                else _swapFRAXForSDT(received, actions.minAmountSDT, address(this));
             }
         }
     }
 
-    // without revert on DIFF_LENGTH() test : 969073 gas
-    // with    revert on DIFF_LENGTH() test : 969226 gas
     function _processGaugesClaim(address[] memory _gauges, Actions memory _actions) internal {
         Actions memory actions = _actions;
         if (
-            (actions.locked.length != depositorsCount) //|| (actions.locked.length != poolsCount)
+            (actions.locked.length != depositorsCount) || (actions.locked.length != poolsCount)
                 || (actions.locked.length != actions.staked.length) || (actions.locked.length != actions.buy.length)
                 || (actions.locked.length != actions.minAmount.length)
         ) {
@@ -296,7 +258,6 @@ contract ClaimRewardModular {
             ILiquidityGauge(gauge).claim_rewards_for(msg.sender, address(this));
 
             // skip the first reward token, it is SDT for any LGV4
-            // it loops at most until max rewards, it is hardcoded on LGV4
             uint256 rewardCount = ILiquidityGauge(gauge).reward_count();
             for (uint8 j = 1; j < rewardCount;) {
                 address token = ILiquidityGauge(gauge).reward_tokens(j);
@@ -323,13 +284,11 @@ contract ClaimRewardModular {
                                 received = _swapBALForSDBAL(
                                     pool, balance, actions.minAmount[poolsIndex[pool]], payable(address(this))
                                 );
-                                IERC20(SD_BAL).approve(gauge, received);
                             } else {
                                 received =
                                     _swapTKNForSdTKN(pool, balance, actions.minAmount[poolsIndex[pool]], address(this));
-                                IERC20(IStableSwap(pool).coins(1)).approve(gauge, received);
                             }
-                            ILiquidityGauge(gauge).deposit(received, msg.sender);
+                            ILiquidityGauge(gauges[tokenSdToken[token]]).deposit(received, msg.sender);
                         }
                     }
                     // Mint sdTKN using depositor and stake it on gauge or not
@@ -337,7 +296,7 @@ contract ClaimRewardModular {
                         if (token == BAL) {
                             _swapBALForBPT(balance, actions.minAmount[depositorsIndex[depositor]], address(this));
                             balance = IERC20(BPT).balanceOf(address(this));
-                            IERC20(BPT).approve(address(depositor), balance);
+                            IERC20(BPT).safeApprove(address(depositor), balance);
                         }
                         IDepositor(depositor).deposit(
                             balance, false, actions.staked[depositorsIndex[depositor]], msg.sender
@@ -348,7 +307,7 @@ contract ClaimRewardModular {
                         IERC20(token).safeTransfer(msg.sender, balance);
                     }
                     // Unreachable code
-                    if (IERC20(token).balanceOf(address(this)) != 0) revert BALANCE_NOT_NULL();
+                    //if (IERC20(token).balanceOf(address(this)) != 0) revert BALANCE_NOT_NULL();
                 }
                 unchecked {
                     ++j;
@@ -419,13 +378,14 @@ contract ClaimRewardModular {
     {
         _swapBALForBPT(amount, minAmount, address(this));
         amount = IERC20(BPT).balanceOf(address(this));
-        minAmount = amount * (BASE_UNIT - 1e16) / BASE_UNIT;
+        minAmount = amount * (BASE_UNIT - slippage) / BASE_UNIT;
 
         IBalancerVault.SingleSwap memory singleSwap = IBalancerVault.SingleSwap(
             IBalancerStablePool(pool).getPoolId(), IBalancerVault.SwapKind.GIVEN_IN, BPT, SD_BAL, amount, "0x"
         );
-        IBalancerVault.FundManagement memory funds = IBalancerVault.FundManagement(address(this), true, receiver, false);
-        output = IBalancerVault(BALANCER_VAULT).swap(singleSwap, funds, minAmount, block.timestamp + 36_000);
+        IBalancerVault.FundManagement memory funds =
+            IBalancerVault.FundManagement(address(this), false, receiver, false);
+        output = IBalancerVault(BALANCER_VAULT).swap(singleSwap, funds, minAmount, block.timestamp + 600);
     }
 
     ////////////////////////////////////////////////////////////////
@@ -438,7 +398,7 @@ contract ClaimRewardModular {
         depositors[token] = depositor;
         depositorsIndex[depositor] = depositorsCount;
         ++depositorsCount;
-        IERC20(token).approve(depositor, type(uint256).max);
+        IERC20(token).safeApprove(depositor, type(uint256).max);
         emit DepositorAdded(token, depositor);
     }
 
@@ -446,9 +406,9 @@ contract ClaimRewardModular {
         if (token == address(0)) revert ADDRESS_NULL();
         if (newDepositor == address(0)) revert ADDRESS_NULL();
         if (depositors[token] == address(0)) revert NOT_ADDED();
-        IERC20(token).approve(depositors[token], 0);
+        IERC20(token).safeApprove(depositors[token], 0);
         depositors[token] = newDepositor;
-        IERC20(token).approve(newDepositor, type(uint256).max);
+        IERC20(token).safeApprove(newDepositor, type(uint256).max);
         emit DepositorUpdated(token, newDepositor);
     }
 
@@ -459,7 +419,7 @@ contract ClaimRewardModular {
         pools[token] = pool;
         poolsIndex[pool] = poolsCount;
         ++poolsCount;
-        IERC20(token).approve(pool, type(uint256).max);
+        IERC20(token).safeApprove(pool, type(uint256).max);
         emit PoolAdded(token, pool);
     }
 
@@ -467,9 +427,9 @@ contract ClaimRewardModular {
         if (token == address(0)) revert ADDRESS_NULL();
         if (newPool == address(0)) revert ADDRESS_NULL();
         if (pools[token] == address(0)) revert NOT_ADDED();
-        IERC20(token).approve(pools[token], 0);
+        IERC20(token).safeApprove(pools[token], 0);
         pools[token] = newPool;
-        IERC20(token).approve(newPool, type(uint256).max);
+        IERC20(token).safeApprove(newPool, type(uint256).max);
         emit PoolUpdated(token, newPool);
     }
 
@@ -480,7 +440,7 @@ contract ClaimRewardModular {
         gauges[sdToken] = gauge;
         gaugesIndex[gauge] = gaugesCount;
         ++gaugesCount;
-        IERC20(sdToken).approve(gauge, type(uint256).max);
+        IERC20(sdToken).safeApprove(gauge, type(uint256).max);
         emit GaugeAdded(sdToken, gauge);
     }
 
@@ -488,9 +448,9 @@ contract ClaimRewardModular {
         if (sdToken == address(0)) revert ADDRESS_NULL();
         if (newGauge == address(0)) revert ADDRESS_NULL();
         if (gauges[sdToken] == address(0)) revert NOT_ADDED();
-        IERC20(sdToken).approve(gauges[sdToken], 0);
+        IERC20(sdToken).safeApprove(gauges[sdToken], 0);
         gauges[sdToken] = newGauge;
-        IERC20(sdToken).approve(newGauge, type(uint256).max);
+        IERC20(sdToken).safeApprove(newGauge, type(uint256).max);
         emit GaugeUpdated(sdToken, newGauge);
     }
 
@@ -525,5 +485,10 @@ contract ClaimRewardModular {
         IERC20(_token).safeTransfer(_recipient, _amount);
 
         emit Recovered(_token, _amount);
+    }
+
+    function updateTokenSdToken(address token, address sdToken) external onlyGovernance {
+        if (token == address(0)) revert ADDRESS_NULL();
+        tokenSdToken[token] = sdToken;
     }
 }

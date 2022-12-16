@@ -198,6 +198,43 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
         assertEq(crv.allowance(address(claimer), FAKE), type(uint256).max);
     }
 
+    function testAddSdGauge() public {
+        vm.startPrank(LOCAL_DEPLOYER);
+        vm.expectRevert(ClaimRewardModular.ADDRESS_NULL.selector);
+        claimer.addSdGauge(address(0), GAUGE_SDCRV);
+        vm.expectRevert(ClaimRewardModular.ADDRESS_NULL.selector);
+        claimer.addSdGauge(SD_CRV, address(0));
+
+        claimer.addSdGauge(SD_CRV, GAUGE_SDCRV);
+
+        assertEq(claimer.gauges(SD_CRV), GAUGE_SDCRV);
+        assertEq(claimer.gaugesIndex(GAUGE_SDCRV), 0);
+        assertEq(claimer.gaugesCount(), 1);
+        assertEq(sdcrv.allowance(address(claimer), GAUGE_SDCRV), type(uint256).max);
+
+        vm.expectRevert(ClaimRewardModular.ALREADY_ADDED.selector);
+        claimer.addSdGauge(SD_CRV, GAUGE_SDCRV);
+    }
+
+    function testUpdateSdGauge() public {
+        vm.startPrank(LOCAL_DEPLOYER);
+        vm.expectRevert(ClaimRewardModular.ADDRESS_NULL.selector);
+        claimer.updateSdGauge(address(0), GAUGE_SDCRV);
+        vm.expectRevert(ClaimRewardModular.ADDRESS_NULL.selector);
+        claimer.updateSdGauge(SD_CRV, address(0));
+        vm.expectRevert(ClaimRewardModular.NOT_ADDED.selector);
+        claimer.updateSdGauge(SD_CRV, GAUGE_SDCRV);
+
+        claimer.addSdGauge(SD_CRV, GAUGE_SDCRV);
+        claimer.updateSdGauge(SD_CRV, FAKE);
+
+        assertEq(claimer.gauges(SD_CRV), FAKE);
+        assertEq(claimer.gaugesIndex(FAKE), 0);
+        assertEq(claimer.gaugesCount(), 1);
+        assertEq(sdcrv.allowance(address(claimer), GAUGE_SDCRV), 0);
+        assertEq(sdcrv.allowance(address(claimer), FAKE), type(uint256).max);
+    }
+
     function testToggleBlacklistOnPool() public {
         assertEq(claimer.blacklisted(FAKE), false);
 
@@ -250,11 +287,30 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
         assertEq(claimer.veSDTFeeDistributor(), FAKE);
     }
 
+    function testRescue() public {
+        deal(CRV, address(claimer), 100);
+        vm.startPrank(LOCAL_DEPLOYER);
+        vm.expectRevert(ClaimRewardModular.ADDRESS_NULL.selector);
+        claimer.rescueERC20(CRV, 100, address(0));
+        claimer.rescueERC20(CRV, 100, FAKE);
+
+        assertEq(crv.balanceOf(FAKE), 100);
+    }
+
+    function testTokenSdToken() public {
+        vm.startPrank(LOCAL_DEPLOYER);
+        vm.expectRevert(ClaimRewardModular.ADDRESS_NULL.selector);
+        claimer.updateTokenSdToken(address(0), FAKE);
+        claimer.updateTokenSdToken(FAKE, CRV);
+        assertEq(claimer.tokenSdToken(FAKE), CRV);
+    }
+
     ////////////////////////////////////////////////////////////////
     /// --- BRIBES
     ///////////////////////////////////////////////////////////////
     function testClaimBribesOnlyNotLockSDT() public {
         executeActions[0] = true;
+        lockSDT = true; // Should have zero effect because only claim bribes and stakeBribes is false
 
         uint256 balanceBeforeGNO = gno.balanceOf(ALICE);
         uint256 balanceBeforeSDT = sdt.balanceOf(ALICE);
@@ -335,7 +391,7 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
         );
 
         vm.startPrank(LOCAL_DEPLOYER);
-        //addDepositorsAndPools();
+        addDepositorsAndPools();
         claimer.init();
         vm.stopPrank();
 
@@ -356,10 +412,11 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
         updateRoot();
         executeActions[0] = true; // claim bribes
         stakeBribes = true;
-        stakeds[0] = true;
-        stakeds[1] = true;
+        stakeds[0] = true; // fxs
+        stakeds[1] = true; // angle
         stakeds[2] = true; // crv
         stakeds[3] = true; // bal
+        stakeds[4] = true; // apw
 
         vm.startPrank(LOCAL_DEPLOYER);
         addDepositorsAndPools();
@@ -488,6 +545,7 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
 
     function testClaimGaugesBuyWithoutStaking() public {
         executeActions[2] = true;
+        buys[1] = true; // angle
         buys[2] = true; // crv
         (
             uint256 claimableSDT,
@@ -506,9 +564,11 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
         uint256 balanceBeforeAGEUR = ageur.balanceOf(ALICE);
         uint256 balanceBeforeSDT = sdt.balanceOf(ALICE);
         uint256 balanceBeforeSDCRV = sdcrv.balanceOf(ALICE);
+        uint256 balanceBeforeSDANGLE = sdangle.balanceOf(ALICE);
         claim(ALICE);
         assertEq(ageur.balanceOf(ALICE), balanceBeforeAGEUR + claimableAGEUR);
-        assertEq(angle.balanceOf(ALICE), balanceBeforeANGLE + claimableANGLE);
+        assertEq(angle.balanceOf(ALICE), balanceBeforeANGLE);
+        assertGt(sdangle.balanceOf(ALICE), balanceBeforeSDANGLE);
         assertEq(crv3.balanceOf(ALICE), balanceBeforeCRV3 + claimableCRV3);
         assertEq(crv.balanceOf(ALICE), balanceBeforeCRV);
         assertEq(sdt.balanceOf(ALICE), balanceBeforeSDT + claimableSDT);
@@ -517,8 +577,14 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
 
     function testClaimGaugesBuyStaking() public {
         executeActions[2] = true;
+        stakeds[0] = true;
+        stakeds[1] = true; // angle
         stakeds[2] = true; // crv
+        stakeds[3] = true;
+        buys[0] = true;
+        buys[1] = true; // angle
         buys[2] = true; // crv
+        buys[3] = true;
         (
             uint256 claimableSDT,
             uint256 claimableCRV,
@@ -536,9 +602,11 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
         uint256 balanceBeforeAGEUR = ageur.balanceOf(ALICE);
         uint256 balanceBeforeSDT = sdt.balanceOf(ALICE);
         uint256 balanceBeforeSDCRVGauge = IERC20(GAUGE_SDCRV).balanceOf(ALICE);
+        uint256 balanceBeforeSDANGLEGAUGE = IERC20(GAUGE_SDANGLE).balanceOf(ALICE);
         claim(ALICE);
         assertEq(ageur.balanceOf(ALICE), balanceBeforeAGEUR + claimableAGEUR);
-        assertEq(angle.balanceOf(ALICE), balanceBeforeANGLE + claimableANGLE);
+        assertEq(angle.balanceOf(ALICE), balanceBeforeANGLE);
+        assertGt(IERC20(GAUGE_SDANGLE).balanceOf(ALICE), balanceBeforeSDANGLEGAUGE);
         assertEq(crv3.balanceOf(ALICE), balanceBeforeCRV3 + claimableCRV3);
         assertEq(crv.balanceOf(ALICE), balanceBeforeCRV);
         assertEq(sdt.balanceOf(ALICE), balanceBeforeSDT + claimableSDT);
@@ -547,7 +615,10 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
 
     function testClaimGaugesMintWithoutStaking() public {
         executeActions[2] = true;
+        lockeds[0] = true;
+        lockeds[1] = true; // angle
         lockeds[2] = true; // crv
+        lockeds[3] = true;
         (
             uint256 claimableSDT,
             uint256 claimableCRV,
@@ -558,23 +629,29 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
 
         uint256 balanceBeforeCRV3 = crv3.balanceOf(ALICE);
         uint256 balanceBeforeCRV = crv.balanceOf(ALICE);
-        uint256 balanceBeforeANGLE = angle.balanceOf(ALICE);
+        uint256 balanceBeforeANGLE = sdangle.balanceOf(ALICE);
         uint256 balanceBeforeAGEUR = ageur.balanceOf(ALICE);
         uint256 balanceBeforeSDT = sdt.balanceOf(ALICE);
         uint256 balanceBeforeSDCRV = sdcrv.balanceOf(ALICE);
         claim(ALICE);
-        assertEq(ageur.balanceOf(ALICE), balanceBeforeAGEUR + claimableAGEUR);
-        assertEq(angle.balanceOf(ALICE), balanceBeforeANGLE + claimableANGLE);
-        assertEq(crv3.balanceOf(ALICE), balanceBeforeCRV3 + claimableCRV3);
-        assertEq(crv.balanceOf(ALICE), balanceBeforeCRV);
-        assertEq(sdt.balanceOf(ALICE), balanceBeforeSDT + claimableSDT);
-        assertApproxEqRel(sdcrv.balanceOf(ALICE), balanceBeforeSDCRV + claimableCRV, 1e15); // due to incentives fee to lock on depositor
+        assertEq(ageur.balanceOf(ALICE), balanceBeforeAGEUR + claimableAGEUR, "1");
+        assertApproxEqRel(sdangle.balanceOf(ALICE), balanceBeforeANGLE + claimableANGLE, 1e15, "2");
+        assertEq(crv3.balanceOf(ALICE), balanceBeforeCRV3 + claimableCRV3, "3");
+        assertEq(crv.balanceOf(ALICE), balanceBeforeCRV, "4");
+        assertEq(sdt.balanceOf(ALICE), balanceBeforeSDT + claimableSDT, "5");
+        assertApproxEqRel(sdcrv.balanceOf(ALICE), balanceBeforeSDCRV + claimableCRV, 1e15, "6"); // due to incentives fee to lock on depositor
     }
 
     function testClaimGaugesMintStaking() public {
         executeActions[2] = true;
-        stakeds[2] = true; // crv
+        lockeds[0] = true;
+        lockeds[1] = true; // angle
         lockeds[2] = true; // crv
+        lockeds[3] = true;
+        stakeds[0] = true;
+        stakeds[1] = true; // angle
+        stakeds[2] = true; // crv
+        stakeds[3] = true;
         (
             uint256 claimableSDT,
             uint256 claimableCRV,
@@ -585,13 +662,13 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
 
         uint256 balanceBeforeCRV3 = crv3.balanceOf(ALICE);
         uint256 balanceBeforeCRV = crv.balanceOf(ALICE);
-        uint256 balanceBeforeANGLE = angle.balanceOf(ALICE);
+        uint256 balanceBeforeANGLE = IERC20(GAUGE_SDANGLE).balanceOf(ALICE);
         uint256 balanceBeforeAGEUR = ageur.balanceOf(ALICE);
         uint256 balanceBeforeSDT = sdt.balanceOf(ALICE);
         uint256 balanceBeforeSDCRVGauge = IERC20(GAUGE_SDCRV).balanceOf(ALICE);
         claim(ALICE);
         assertEq(ageur.balanceOf(ALICE), balanceBeforeAGEUR + claimableAGEUR);
-        assertEq(angle.balanceOf(ALICE), balanceBeforeANGLE + claimableANGLE);
+        assertApproxEqRel(IERC20(GAUGE_SDANGLE).balanceOf(ALICE), balanceBeforeANGLE + claimableANGLE, 1e15);
         assertEq(crv3.balanceOf(ALICE), balanceBeforeCRV3 + claimableCRV3);
         assertEq(crv.balanceOf(ALICE), balanceBeforeCRV);
         assertEq(sdt.balanceOf(ALICE), balanceBeforeSDT + claimableSDT);
@@ -609,7 +686,10 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
 
     function testClaimGaugesBuyWithoutStakingBalancer() public {
         executeActions[2] = true;
-        buys[3] = true; // bal
+        buys[0] = true;
+        buys[1] = true; // angle
+        buys[2] = true; // crv
+        buys[3] = true;
 
         (uint256 claimableSDT,,,,, uint256 claimableBAL) = claimableAmount(BOB);
         uint256 balanceBeforeSDT = sdt.balanceOf(BOB);
@@ -621,8 +701,14 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
 
     function testClaimGaugesBuyAndStakingBalancer() public {
         executeActions[2] = true;
-        buys[3] = true; // bal
-        stakeds[3] = true; // bal
+        buys[0] = true;
+        buys[1] = true; // angle
+        buys[2] = true; // crv
+        buys[3] = true;
+        stakeds[0] = true;
+        stakeds[1] = true; // angle
+        stakeds[2] = true; // crv
+        stakeds[3] = true;
 
         (,,,,, uint256 claimableBAL) = claimableAmount(BOB);
         uint256 balanceBeforeSDBALGauge = IERC20(GAUGE_SDBAL).balanceOf(BOB);
@@ -634,7 +720,10 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
 
     function testClaimGaugesMintWithoutStakingBalancer() public {
         executeActions[2] = true;
-        lockeds[3] = true; // bal
+        lockeds[0] = true;
+        lockeds[1] = true; // angle
+        lockeds[2] = true; // crv
+        lockeds[3] = true;
 
         (,,,,, uint256 claimableBAL) = claimableAmount(BOB);
         uint256 balanceBeforeSDBAL = sdbal.balanceOf(BOB);
@@ -644,8 +733,14 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
 
     function testClaimGaugesMintAndStakingBalancer() public {
         executeActions[2] = true;
-        lockeds[3] = true; // bal
-        stakeds[3] = true; // bal
+        lockeds[0] = true;
+        lockeds[1] = true; // angle
+        lockeds[2] = true; // crv
+        lockeds[3] = true;
+        stakeds[0] = true;
+        stakeds[1] = true; // angle
+        stakeds[2] = true; // crv
+        stakeds[3] = true;
 
         (,,,,, uint256 claimableBAL) = claimableAmount(BOB);
         uint256 balanceBeforeSDBALGauge = IERC20(GAUGE_SDBAL).balanceOf(BOB);
@@ -784,10 +879,62 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
         claimer.claimAndExtraActions(executeActions, gaugesList1, actions);
     }
 
-    // Todo : ClaimExtraAction with all flow
-    // Todo : _processGaugesClaim with depositor or pool not set
-    // Todo : _processSDT with 0 SDT
-    // Todo : Add events
+    function testClaimExtraCompletALICE() public {
+        executeActions[0] = true;
+        executeActions[1] = true;
+        executeActions[2] = true;
+        stakeBribes = true;
+        choice = 2;
+        lockeds[0] = true;
+        lockeds[1] = true; // angle
+        lockeds[2] = true; // crv
+        lockeds[3] = true;
+        stakeds[0] = true;
+        stakeds[1] = true; // angle
+        stakeds[2] = true; // crv
+        stakeds[3] = true;
+        lockSDT = true;
+
+        claim(ALICE);
+    }
+
+    function testClaimExtraCompletBOB() public {
+        executeActions[0] = true;
+        executeActions[1] = true;
+        executeActions[2] = true;
+        stakeBribes = true;
+        choice = 2;
+        lockeds[0] = true;
+        lockeds[1] = true; // angle
+        lockeds[2] = true; // crv
+        lockeds[3] = true;
+        stakeds[0] = true;
+        stakeds[1] = true; // angle
+        stakeds[2] = true; // crv
+        stakeds[3] = true;
+        lockSDT = true;
+        updateRoot();
+        vm.startPrank(LOCAL_DEPLOYER);
+        addDepositorsAndPools();
+        claimer.init();
+        vm.stopPrank();
+        // Create the Actions structure
+        ClaimRewardModular.Actions memory actions = ClaimRewardModular.Actions(
+            claimParamsCustom,
+            stakeBribes,
+            swapVeSDTRewards,
+            choice,
+            minAmountSDT,
+            lockeds,
+            stakeds,
+            buys,
+            minAmounts,
+            lockSDT
+        );
+
+        vm.prank(BOB);
+        claimer.claimAndExtraActions(executeActions, gaugesList2, actions);
+    }
 
     ////////////////////////////////////////////////////////////////
     /// --- HELPERS
@@ -887,6 +1034,7 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
         claimer.addPool(ANGLE, POOL_ANGLE_SDANGLE);
         claimer.addPool(CRV, POOL_CRV_SDCRV);
         claimer.addPool(BAL, POOL_BAL_SDBAL);
+        claimer.addPool(APW, POOL_APW_SDAPW);
         claimer.addSdGauge(SD_FXS, GAUGE_SDFXS);
         claimer.addSdGauge(SD_ANGLE, GAUGE_SDANGLE);
         claimer.addSdGauge(SD_CRV, GAUGE_SDCRV);

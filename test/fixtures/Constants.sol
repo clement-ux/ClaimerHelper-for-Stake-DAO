@@ -61,6 +61,7 @@ abstract contract Constants {
     address public constant POOL_FXS_SDFXS = 0x8c524635d52bd7b1Bd55E062303177a7d916C046;
     address public constant POOL_ANGLE_SDANGLE = 0x48fF31bBbD8Ab553Ebe7cBD84e1eA3dBa8f54957;
     address public constant POOL_CRV_SDCRV = 0xf7b55C3732aD8b2c2dA7c24f30A69f55c54FB717;
+    address public constant POOL_APW_SDAPW = 0x6788f608CfE5CfCD02e6152eC79505341E0774be;
     ////////////////////////////////////////////////////////////////
     /// --- STAKE DAO TOKENS
     ///////////////////////////////////////////////////////////////

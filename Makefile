@@ -5,7 +5,7 @@ include .env
 ETHERSCAN_API_KEY==${ETHERSCAN_KEY}
 
 default:; @forge fmt && forge build
-test:; @forge fmt && forge test --match-contract ClaimRewardModularTest --match-test testClaimBribesOnlyAndLockSDT -vvvv --etherscan-api-key ${ETHERSCAN_KEY}
+test:; @forge fmt && forge test --match-contract ClaimRewardModularTest --match-test test -vvv --etherscan-api-key ${ETHERSCAN_KEY}
 
 lrep:; @forge coverage --report debug > report.txt
 lcov:; @forge coverage --report lcov
