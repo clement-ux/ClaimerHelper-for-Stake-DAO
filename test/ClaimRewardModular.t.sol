@@ -255,16 +255,6 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
         assertEq(claimer.governance(), ALICE);
     }
 
-    function testInit() public {
-        assertEq(claimer.initialization(), false);
-        vm.expectRevert(ClaimRewardModular.AUTH_ONLY_GOVERNANCE.selector);
-        claimer.init();
-        vm.startPrank(LOCAL_DEPLOYER);
-        claimer.init();
-        vm.expectRevert(ClaimRewardModular.ALREADY_INITIALIZED.selector);
-        claimer.init();
-    }
-
     function testSetSlippage() public {
         vm.prank(LOCAL_DEPLOYER);
         claimer.setSlippage(1e17);
@@ -335,7 +325,6 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
 
         vm.startPrank(LOCAL_DEPLOYER);
         addDepositorsAndPools();
-        claimer.init();
         vm.stopPrank();
 
         ClaimRewardModular.Actions memory actions = ClaimRewardModular.Actions(
@@ -392,7 +381,6 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
 
         vm.startPrank(LOCAL_DEPLOYER);
         addDepositorsAndPools();
-        claimer.init();
         vm.stopPrank();
 
         uint256 balanceBeforeSDCRV = sdcrv.balanceOf(BOB);
@@ -420,7 +408,6 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
 
         vm.startPrank(LOCAL_DEPLOYER);
         addDepositorsAndPools();
-        claimer.init();
         vm.stopPrank();
 
         // Create the Actions structure
@@ -756,7 +743,6 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
 
     function testClaimReward() public {
         vm.prank(LOCAL_DEPLOYER);
-        claimer.init();
         (
             uint256 claimableSDT,
             uint256 claimableCRV,
@@ -782,7 +768,6 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
 
     function testClaimRewardRevert() public {
         vm.startPrank(LOCAL_DEPLOYER);
-        claimer.init();
         claimer.toggleBlacklistOnGauge(gaugesList1[0]);
         vm.stopPrank();
         vm.prank(ALICE);
@@ -795,7 +780,6 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
 
         vm.startPrank(LOCAL_DEPLOYER);
         addDepositorsAndPools();
-        claimer.init();
         vm.stopPrank();
 
         lockeds.push(false);
@@ -856,7 +840,6 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
 
         vm.startPrank(LOCAL_DEPLOYER);
         addDepositorsAndPools();
-        claimer.init();
         vm.stopPrank();
 
         vm.prank(LOCAL_DEPLOYER);
@@ -916,7 +899,6 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
         updateRoot();
         vm.startPrank(LOCAL_DEPLOYER);
         addDepositorsAndPools();
-        claimer.init();
         vm.stopPrank();
         // Create the Actions structure
         ClaimRewardModular.Actions memory actions = ClaimRewardModular.Actions(
@@ -955,7 +937,6 @@ contract ClaimRewardModularTest is Test, Constants, MerkleProofFile {
         );
         vm.startPrank(LOCAL_DEPLOYER);
         addDepositorsAndPools();
-        claimer.init();
         vm.stopPrank();
 
         vm.startPrank(user);

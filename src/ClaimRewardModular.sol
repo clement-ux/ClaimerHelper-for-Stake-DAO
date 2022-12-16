@@ -101,8 +101,6 @@ contract ClaimRewardModular {
     uint256 public gaugesCount;
     /// @notice Max slippage for swap
     uint256 public slippage = 1e16;
-    /// @notice If smart contract is initialized
-    bool public initialization;
 
     /// @notice Token -> Depositors
     mapping(address => address) public depositors;
@@ -152,7 +150,6 @@ contract ClaimRewardModular {
 
     error NOT_ADDED();
     error ALREADY_ADDED();
-    error ALREADY_INITIALIZED();
     error DIFFERENT_LENGTH();
 
     error ADDRESS_NULL();
@@ -166,13 +163,6 @@ contract ClaimRewardModular {
 
     constructor() {
         governance = msg.sender;
-    }
-
-    /// @notice Initialize contract
-    /// @dev Only callable once
-    function init() external onlyGovernance {
-        if (initialization) revert ALREADY_INITIALIZED();
-        initialization = true;
         IERC20(SDT).safeApprove(VE_SDT, type(uint256).max);
         IERC20(BAL).safeApprove(BALANCER_VAULT, type(uint256).max);
         IERC20(BPT).safeApprove(BALANCER_VAULT, type(uint256).max);
@@ -340,8 +330,7 @@ contract ClaimRewardModular {
                     else {
                         IERC20(token).safeTransfer(msg.sender, balance);
                     }
-                    // Unreachable code
-                    //if (IERC20(token).balanceOf(address(this)) != 0) revert BALANCE_NOT_NULL();
+                    if (IERC20(token).balanceOf(address(this)) != 0) revert BALANCE_NOT_NULL();
                 }
                 unchecked {
                     ++j;
@@ -364,8 +353,6 @@ contract ClaimRewardModular {
             } else {
                 IERC20(SDT).safeTransfer(msg.sender, amount);
             }
-            // Unreachable code
-            //if (IERC20(SDT).balanceOf(address(this)) != 0) revert BALANCE_NOT_NULL();
         }
     }
 
