@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity 0.8.17;
 
-import "lib/forge-std/src/Test.sol";
-
 import {ILiquidityGauge} from "src/interfaces/ILiquidityGauge.sol";
 import {IDepositor} from "src/interfaces/IDepositor.sol";
 import {IVeSDT} from "src/interfaces/IVeSDT.sol";
@@ -24,7 +22,18 @@ contract ClaimRewardModular {
     ////////////////////////////////////////////////////////////////
     /// --- STRUCTS
     ///////////////////////////////////////////////////////////////
-
+    /// @notice Actions structure
+    /// @param claims Merkleproof and co.
+    /// @param stakeBribes Stake bribes (like SDT or sdCRV etc.)
+    /// @param swapVeSDTRewards Swap rewards from veSDT
+    /// @param choice Choice for swapping :
+    /// 0 -> FRAX_3CRV; 1 -> FRAX; 2 -> SDT
+    /// @param minAmountSDT minAmount received from swap
+    /// @param locked if obtaining sdToken using depositor (minting)
+    /// @param staked if stake sdToken on gauge
+    /// @param buy if obtaining sdToken using pool(buying)
+    /// @param minAmount min amount obtained for swapping to sdToken
+    /// @param lockSDT if locking SDT into veSDT
     struct Actions {
         // For Bribes
         IMultiMerkleStash.claimParam[] claims;
@@ -78,24 +87,38 @@ contract ClaimRewardModular {
     /// --- STORAGE VARS
     ///////////////////////////////////////////////////////////////
 
+    /// @notice Governance address
     address public governance;
+    /// @notice Bribes rewards distributor
     address public multiMerkleStash = 0x03E34b085C52985F6a5D27243F20C84bDdc01Db4;
+    /// @notice veSDT rewards distributor
     address public veSDTFeeDistributor = 0x29f3dd38dB24d3935CF1bf841e6b2B461A3E5D92;
-
+    /// @notice Counter for depositor
     uint256 public depositorsCount;
+    /// @notice Counter for pools
     uint256 public poolsCount;
+    /// @notice Counter for staking gauge
     uint256 public gaugesCount;
+    /// @notice Max slippage for swap
     uint256 public slippage = 1e16;
-
+    /// @notice If smart contract is initialized
     bool public initialization;
 
+    /// @notice Token -> Depositors
     mapping(address => address) public depositors;
+    /// @notice Depositos -> Index
     mapping(address => uint256) public depositorsIndex;
+    /// @notice Tokens -> Pools
     mapping(address => address) public pools;
+    /// @notice Pools -> Index
     mapping(address => uint256) public poolsIndex;
+    /// @notice Tokens -> staking gauge
     mapping(address => address) public gauges;
+    /// @notice staking gauge -> index
     mapping(address => uint256) public gaugesIndex;
+    /// @notice Token -> sdToken
     mapping(address => address) public tokenSdToken;
+    /// @notice Gauge -> is blacklisted or not
     mapping(address => bool) public blacklisted;
 
     ////////////////////////////////////////////////////////////////
@@ -145,6 +168,8 @@ contract ClaimRewardModular {
         governance = msg.sender;
     }
 
+    /// @notice Initialize contract
+    /// @dev Only callable once
     function init() external onlyGovernance {
         if (initialization) revert ALREADY_INITIALIZED();
         initialization = true;
@@ -164,6 +189,8 @@ contract ClaimRewardModular {
     /// --- EXTERNAL LOGIC
     ///////////////////////////////////////////////////////////////
 
+    /// @notice Simple function for claiming rewards from differents gauges
+    /// @param _gauges List of gauges to claim rewards
     function claimRewards(address[] calldata _gauges) external {
         uint256 length = _gauges.length;
         for (uint8 i; i < length;) {
@@ -177,8 +204,12 @@ contract ClaimRewardModular {
         emit RewardsClaimed(_gauges);
     }
 
-    // user need to safeApprove this contract for the following token :
-    // SDT, SD_FRAX_3CRV, all sdTKN that user want to claim
+    /// @notice Claim multiple rewards and do extra actions on top of it
+    /// @dev user need to approve : SDT, SD_FRAX_3CRV, all sdTKN that user want to claim
+    /// @param executeActions List of bool representing all actions to do.
+    /// Index 0->Claim bribes; Index 1->Claim rewards from veSDT; Index 2->Claim rewards from `_gauges``
+    /// @param _gauges List of gauges to claim rewards
+    /// @param actions List of Actions to do with rewards obtained
     function claimAndExtraActions(bool[] calldata executeActions, address[] calldata _gauges, Actions calldata actions)
         external
     {
@@ -194,7 +225,8 @@ contract ClaimRewardModular {
     ////////////////////////////////////////////////////////////////
     /// --- INTERNAL LOGIC
     ///////////////////////////////////////////////////////////////
-
+    /// @notice Internal function for claiming bribes
+    /// @param _actions List of Actions to do with rewards obtained
     function _processBribes(Actions calldata _actions) internal {
         Actions memory actions = _actions;
         IMultiMerkleStash(multiMerkleStash).claimMulti(msg.sender, actions.claims);
@@ -219,10 +251,9 @@ contract ClaimRewardModular {
         }
     }
 
+    /// @notice Internal function for claiming rewards from veSDT
+    /// @param _actions List of Actions to do with rewards obtained
     function _processSdFrax3CRV(Actions calldata _actions) internal {
-        // Choice : 0 -> Obtain FRAX_3CRV
-        // Choice : 1 -> Obtain FRAX
-        // Choice : 2 -> Obtain SDT
         Actions memory actions = _actions;
         uint256 claimed = IFeeDistributor(veSDTFeeDistributor).claim(msg.sender);
         if (actions.swapVeSDTRewards) {
@@ -241,6 +272,9 @@ contract ClaimRewardModular {
         }
     }
 
+    /// @notice Internal function for claiming rewards from gauges
+    /// @param _gauges List of gauges to claim rewards
+    /// @param _actions List of Actions to do with rewards obtained
     function _processGaugesClaim(address[] memory _gauges, Actions memory _actions) internal {
         Actions memory actions = _actions;
         if (
@@ -320,6 +354,8 @@ contract ClaimRewardModular {
         emit RewardsClaimed(_gauges);
     }
 
+    /// @notice Internal function for locking SDT obtain from previous rewards or to transfert to user
+    /// @param lockSDT Boolean for transfering SDT to user or relock them
     function _processSDT(bool lockSDT) internal {
         uint256 amount = IERC20(SDT).balanceOf(address(this));
         if (amount != 0) {
@@ -336,11 +372,20 @@ contract ClaimRewardModular {
     ////////////////////////////////////////////////////////////////
     /// --- HELPERS
     ///////////////////////////////////////////////////////////////
+    /// @notice Helper for swapping Frax to SDT
+    /// @param _amount Amount of Frax to swap
+    /// @param _minAmount Minimum amount to receive from swap in SDT
+    /// @param _receiver Receiver from the SDT obtained with swap
     function _swapFRAXForSDT(uint256 _amount, uint256 _minAmount, address _receiver) private returns (uint256 output) {
         // swap FRAX for SDT
         output = IZap(CURVE_ZAPPER).exchange(SDT_FXBP, 1, 0, _amount, _minAmount, false, _receiver);
     }
 
+    /// @notice Helper for swapping any Token to sdToken
+    /// @param _pool Address of the pool for the swap
+    /// @param _amount Amount of Token to swap
+    /// @param _minAmount Minimum amount to receive from swap in sdToken
+    /// @param _receiver Receiver from the SDT obtained with swap
     function _swapTKNForSdTKN(address _pool, uint256 _amount, uint256 _minAmount, address _receiver)
         private
         returns (uint256 output)
@@ -349,6 +394,10 @@ contract ClaimRewardModular {
         output = IStableSwap(_pool).exchange(0, 1, _amount, _minAmount, _receiver);
     }
 
+    /// @notice Helper for swapping Bal to Bpt
+    /// @param amount Amount of Bal to swap
+    /// @param minAmount Minimum amount to receive from swap in Bpt
+    /// @param receiver Receiver from the SDT obtained with swap
     function _swapBALForBPT(uint256 amount, uint256 minAmount, address receiver) private {
         address[] memory assets = new address[](2);
         assets[0] = BAL;
@@ -372,6 +421,11 @@ contract ClaimRewardModular {
         );
     }
 
+    /// @notice Helper for swapping any Bal to sdBal
+    /// @param pool Address of the pool for the swap
+    /// @param amount Amount of Bal to swap
+    /// @param minAmount Minimum amount to receive from swap in sdBal
+    /// @param receiver Receiver from the SDT obtained with swap
     function _swapBALForSDBAL(address pool, uint256 amount, uint256 minAmount, address payable receiver)
         private
         returns (uint256 output)
@@ -391,6 +445,9 @@ contract ClaimRewardModular {
     ////////////////////////////////////////////////////////////////
     /// --- GOVERNANCE
     ///////////////////////////////////////////////////////////////
+    /// @notice Add a new depositor
+    /// @param token Token to deposit
+    /// @param depositor Address of the depositor
     function addDepositor(address token, address depositor) external onlyGovernance {
         if (token == address(0)) revert ADDRESS_NULL();
         if (depositor == address(0)) revert ADDRESS_NULL();
@@ -402,6 +459,9 @@ contract ClaimRewardModular {
         emit DepositorAdded(token, depositor);
     }
 
+    /// @notice Update a previous depositor
+    /// @param token Token to deposit
+    /// @param newDepositor Address of the newDepositor
     function updateDepositor(address token, address newDepositor) external onlyGovernance {
         if (token == address(0)) revert ADDRESS_NULL();
         if (newDepositor == address(0)) revert ADDRESS_NULL();
@@ -412,6 +472,9 @@ contract ClaimRewardModular {
         emit DepositorUpdated(token, newDepositor);
     }
 
+    /// @notice Add a new pools for token/sdToken
+    /// @param token Token
+    /// @param pool Address of the pool
     function addPool(address token, address pool) external onlyGovernance {
         if (token == address(0)) revert ADDRESS_NULL();
         if (pool == address(0)) revert ADDRESS_NULL();
@@ -423,6 +486,9 @@ contract ClaimRewardModular {
         emit PoolAdded(token, pool);
     }
 
+    /// @notice Update a previous pool
+    /// @param token Token
+    /// @param newPool Address of the newPool
     function updatePool(address token, address newPool) external onlyGovernance {
         if (token == address(0)) revert ADDRESS_NULL();
         if (newPool == address(0)) revert ADDRESS_NULL();
@@ -433,6 +499,9 @@ contract ClaimRewardModular {
         emit PoolUpdated(token, newPool);
     }
 
+    /// @notice Add a new gauge for staking sdToken
+    /// @param sdToken sdToken
+    /// @param gauge Address of the gauge
     function addSdGauge(address sdToken, address gauge) external onlyGovernance {
         if (sdToken == address(0)) revert ADDRESS_NULL();
         if (gauge == address(0)) revert ADDRESS_NULL();
@@ -444,6 +513,9 @@ contract ClaimRewardModular {
         emit GaugeAdded(sdToken, gauge);
     }
 
+    /// @notice Update a previous gauge
+    /// @param sdToken sdToken
+    /// @param newGauge Address of the newGauge
     function updateSdGauge(address sdToken, address newGauge) external onlyGovernance {
         if (sdToken == address(0)) revert ADDRESS_NULL();
         if (newGauge == address(0)) revert ADDRESS_NULL();
@@ -454,41 +526,58 @@ contract ClaimRewardModular {
         emit GaugeUpdated(sdToken, newGauge);
     }
 
+    /// @notice Toggle a gauge to blacklisted
+    /// @param gauge address of the gauge to toggle the blacklist
     function toggleBlacklistOnGauge(address gauge) external onlyGovernance {
         if (gauge == address(0)) revert ADDRESS_NULL();
         blacklisted[gauge] = !blacklisted[gauge];
         emit BlacklistGauge(gauge, blacklisted[gauge]);
     }
 
+    /// @notice Update or create a relation between token and sdToken
+    /// @param token Address of the token
+    /// @param sdToken Address of the sdToken linked to `token`
+    function updateTokenSdToken(address token, address sdToken) external onlyGovernance {
+        if (token == address(0)) revert ADDRESS_NULL();
+        tokenSdToken[token] = sdToken;
+    }
+
+    /// @notice Give ownership of the contract to anther address
+    /// @param _governance address of the new governance
     function setGovernance(address _governance) external onlyGovernance {
         if (_governance == address(0)) revert ADDRESS_NULL();
         emit GovernanceChanged(governance, _governance);
         governance = _governance;
     }
 
+    /// @notice Set slippage
+    /// @param _slippage new slippage value
     function setSlippage(uint256 _slippage) external onlyGovernance {
         slippage = _slippage;
     }
 
+    /// @notice Set Bribes distributor
+    /// @param _multiMerkleStash new address for bribes distributor
     function setMultiMerkleStash(address _multiMerkleStash) external onlyGovernance {
         if (_multiMerkleStash == address(0)) revert ADDRESS_NULL();
         multiMerkleStash = _multiMerkleStash;
     }
 
+    /// @notice Set veSDT rewards distributor
+    /// @param _veSDTFeeDistributor new address for veSDT rewards distributor
     function setVeSDTFeeDistributor(address _veSDTFeeDistributor) external onlyGovernance {
         if (_veSDTFeeDistributor == address(0)) revert ADDRESS_NULL();
         veSDTFeeDistributor = _veSDTFeeDistributor;
     }
 
+    /// @notice Rescue ERC20 token stuck on the contract
+    /// @param _token address of the token to rescue
+    /// @param _amount amount to rescue
+    /// @param _recipient address for the rescue token
     function rescueERC20(address _token, uint256 _amount, address _recipient) external onlyGovernance {
         if (_recipient == address(0)) revert ADDRESS_NULL();
         IERC20(_token).safeTransfer(_recipient, _amount);
 
         emit Recovered(_token, _amount);
-    }
-
-    function updateTokenSdToken(address token, address sdToken) external onlyGovernance {
-        if (token == address(0)) revert ADDRESS_NULL();
-        tokenSdToken[token] = sdToken;
     }
 }
